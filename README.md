@@ -40,8 +40,9 @@ The installation process is janky right now.
 ipython profile create lua
 ```
 
- * Modify the profile's `ipython_config.py` to use lua_ipython_kernel.  This will be at either
- `~/.config/ipython/lua/ipython_config.py` or `~/.ipython/lua/ipython_config.py`:
+ * Modify the profile's `ipython_config.py` to use lua_ipython_kernel.  This
+ will be at either `~/.config/ipython/profile_lua/ipython_config.py` or
+ `~/.ipython/profile_lua/ipython_config.py`:
 
 ```
 # Configuration file for ipython.
