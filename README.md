@@ -7,9 +7,11 @@ This is a kernel to support Lua with [IPython](http://ipython.org).  It is pure 
 
 The following Lua libraries are required:
 
- * [zeromq](http://zeromq.org/bindings:lua)
- * [dkjson](http://dkolf.de/src/dkjson-lua.fsl/home)
- * [uuid](https://github.com/Tieske/uuid)
+ * [lzmq](https://github.com/zeromq/lzmq) zeromq for Lua
+
+The code for Lua JSON of dkjs habeen embedded into the
+Kenel source. Uuid's are generated using SO commands via
+io.popen.
 
 Here's how to install via [LuaRocks](http://luarocks.org/):
     
