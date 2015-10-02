@@ -763,8 +763,6 @@ local z_RCVMORE, z_SNDMORE = zmq.RCVMORE, zmq.SNDMORE
 local MSG_DELIM = '<IDS|MSG>'
 local username = os.getenv('USER') or "unknown"
 
-
-
 -------------------------------------------------------------------------------
 -- IPython Message ("ipmsg") functions
 
@@ -837,6 +835,39 @@ end
 
 
 -------------------------------------------------------------------------------
+
+-- environment where all code is executed
+local env_session
+local env_header
+local env_source
+local function pubstr(str)
+  print("PUBPUB", str)
+  local header = ipmsg_header( env_session, 'display_data' )
+  local content = json.encode{
+    source = env_source,
+    data = { ['text/plain'] = str },
+    -- metadata = { ['text/plain'] = {} },
+  }
+  print("CONTENT", content)
+  ipmsg_send(kernel.iopub_sock, env_session, '', header, env_header, '{}', content)
+end
+local env = {}
+for k,v in pairs(_G) do env[k] = v end
+env.args = nil
+env.print = function(...)
+  local str = table.concat(table.pack(...),"\t")
+  pubstr(str)
+end
+env.io.write = function(...)
+  local str = table.concat(table.pack(...))
+  pubstring(str)
+end
+
+local function add_return(code)
+  return code
+end
+
+-------------------------------------------------------------------------------
 -- ZMQ Read Handlers
 
 local function on_hb_read( sock )
@@ -857,8 +888,6 @@ local function on_stdin_read( sock )
   -- TODO: handle 'timeout' error
   print("STDIN", data)
 end
-
-
 
 local function on_shell_read( sock )
   -- TODO: error handling
@@ -887,10 +916,30 @@ local function on_shell_read( sock )
     local content = json.encode({
         status = 'ok',
         execution_count = kernel.execution_count,
+        payload = {},
+        user_expresions = {},
     })
 
     ipmsg_send(sock, header_obj.session, '', header, msg.header, '{}', content)
-
+    
+    local header = ipmsg_header( header_obj.session, 'status' )
+    local content = json.encode{ execution_state='busy' }
+    ipmsg_send(kernel.iopub_sock, header_obj.session, '',
+               header, '{}', '{}', content)
+    local msg_content = json.decode(msg.content)
+    local code = msg_content.code
+    env_header  = msg.header
+    env_session = header_obj.session
+    env_source  = code
+    local f = load(add_return(code), nil, nil, env)
+    local out = f()
+    if out then
+      -- TODO: show output of the function
+    end
+    
+    local content = json.encode{ execution_state='idle' }
+    ipmsg_send(kernel.iopub_sock, header_obj.session, '',
+               header, '{}', '{}', content)
   end
 
 end
