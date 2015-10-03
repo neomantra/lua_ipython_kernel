@@ -41,9 +41,23 @@ do
 end
 
 local json = require "iPyLua.dkjson"
+local zmq  = require 'lzmq'
+local zmq_poller = require 'lzmq.poller'
+local z_NOBLOCK, z_POLLIN = zmq.NOBLOCK, zmq.POLL_IN
+local z_RCVMORE, z_SNDMORE = zmq.RCVMORE, zmq.SNDMORE
+local zassert = zmq.assert
+
+local uuid = require 'iPyLua.uuid' -- TODO: randomseed or luasocket or something else
+
+local HMAC = ''
+local MSG_DELIM = '<IDS|MSG>'
+local username = os.getenv('USER') or "unknown"
 
 -- our kernel's state
 local kernel = { execution_count=0 }
+
+-- sockets description
+local kernel_sockets
 
 local function next_execution_count()
   kernel.execution_count = kernel.execution_count + 1
@@ -61,19 +75,6 @@ do
   kernel.connection_obj = assert( json.decode(connection_json) )
   connection_file:close()
 end
-
-local HMAC = ''
-
-local zmq = require 'lzmq'
-local zmq_poller = require 'lzmq.poller'
-local z_NOBLOCK, z_POLLIN = zmq.NOBLOCK, zmq.POLL_IN
-local z_RCVMORE, z_SNDMORE = zmq.RCVMORE, zmq.SNDMORE
-local zassert = zmq.assert
-
-local uuid = require 'iPyLua.uuid' -- TODO: randomseed or luasocket or something else
-
-local MSG_DELIM = '<IDS|MSG>'
-local username = os.getenv('USER') or "unknown"
 
 -------------------------------------------------------------------------------
 -- IPython Message ("ipmsg") functions
@@ -162,6 +163,14 @@ end
 
 -------------------------------------------------------------------------------
 
+local function help(str)
+  for i=#help_functions,1,-1 do
+    local data,metadata = help_functions[i](str)
+    if data then pyout(data,metadata) return true end
+  end
+  return nil,"Documentation not found"
+end
+
 -- environment where all code is executed
 local new_environment
 local env_session
@@ -236,7 +245,7 @@ do
     local env_G,env = {},{}
     for k,v in pairs(_G) do env_G[k] = v end
     env_G.args = nil
-    env_G._G   = env
+    env_G._G   = env_G
     env_G._ENV = env
     local env_G = setmetatable(env_G, { __index = _G })
     local env = setmetatable(env, { __index = env_G })
@@ -260,6 +269,31 @@ do
     
     env_G.vars = function()
       print_obj(env, math.huge)
+    end
+
+    env_G.help = function(str) help(str) end
+    
+    env_G["%quickref"] = function()
+      local tbl = {
+        "?            -> Introduction and overview.",
+        "%quickref    -> This guide.",
+        "help(object) -> Help about a given object.",
+        "object?      -> Help about a given object.",
+        "print(...)   -> Print a list of objects using \\t as separator.",
+        "                If only one object is given, it would be printed",
+        "                in a fancy way when possible. If more than one",
+        "                object is given, the fancy version will be used",
+        "                only if it fits in one line, otherwise the type",
+        "                of the object will be shown.",
+        "vars()       -> Shows all global variables declared by the user.",
+      }
+      print_obj(table.concat(tbl,"\n"))
+    end
+
+    env_G["%guiref"] = function()
+      local tbl = {
+        "GUI reference not written.",
+      }
     end
     
     return env,env_G
@@ -326,13 +360,12 @@ local function execute_code(parent)
   env_parent  = parent
   env_session = session
   env_source  = code
-  if code:find("^%s-%?") then
-    for i=#help_functions,1,-1 do
-      local data,metadata = help_functions[i](code:gsub("^%s-%?", ""))
-      if data then pyout(data,metadata) return true end
-    end
-    return nil,"Documentation not found"
+  if code:find("%?+\n?$") then
+    return help(code:gsub("%?+\n?$", ""))
   else
+    if code:sub(1,1) == "%" then
+      code = ("_G[%q]()"):format(code:gsub("\n",""))
+    end
     if code:sub(1,1) == "=" then code = "return " .. code:sub(2) end
     local ok,err = true,nil
     local f,msg = load(code, nil, nil, env)
@@ -414,7 +447,6 @@ local shell_routes = {
   end,
 
   shutdown_request = function(sock, parent)
-    print("SHUTDOWN")
     parent.content = json.decode(parent.content)
     --
     send_busy_message(sock, parent)
@@ -477,7 +509,7 @@ end
 -------------------------------------------------------------------------------
 -- SETUP
 
-local kernel_sockets = {
+kernel_sockets = {
   { name = 'heartbeat_sock', sock_type = zmq.REP,    port = 'hb',      handler = on_hb_read },
   { name = 'control_sock',   sock_type = zmq.ROUTER, port = 'control', handler = on_control_read },
   { name = 'stdin_sock',     sock_type = zmq.ROUTER, port = 'stdin',   handler = on_stdin_read },
