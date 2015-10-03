@@ -85,8 +85,11 @@ And of course thanks to the [IPython folks ](http://ipython.org/citing.html).
 **lua_ipython_kernel** is distributed under the
   [MIT License](http://opensource.org/licenses/mit-license.php).
 
-> lua_ipython_kernel
-> 
+> iPyLua
+> Copyright (c) 2015 Francisco Zamora-Martinez. Simplified, less deps and making
+> it work.
+>
+> Original name and copyright: lua_ipython_kernel
 > Copyright (c) 2013 Evan Wies.  All rights reserved.
 > 
 > Permission is hereby granted, free of charge, to any person obtaining a copy
