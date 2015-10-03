@@ -1,4 +1,4 @@
-# iPyLua: Lua IPython Kernel
+1;3803;0c1# iPyLua: Lua IPython Kernel
 
 This is a kernel to support Lua with [IPython](http://ipython.org).  It is pure
 Lua and should work with both Lua and LuaJIT.
@@ -24,12 +24,12 @@ The installation process is janky right now.
  * Create a profile with IPython:
 
 ```
-$ ipython profile create lua
+$ ipython profile create iPyLua
 ```
 
  * Modify the profile's `ipython_config.py` to use iPyLua.  This
- will be at either `~/.config/ipython/profile_lua/ipython_config.py` or
- `~/.ipython/profile_lua/ipython_config.py`:
+ will be at either `~/.config/ipython/profile_iPyLua/ipython_config.py` or
+ `~/.ipython/profile_iPyLua/ipython_config.py`:
 
 ```Python
 # Configuration file for ipython.
@@ -50,9 +50,9 @@ c.Session.keyfile = b''
  * Invoke IPython with this Lua kernel:
 
 ```
-$ ipython console --profile lua
+$ ipython console --profile iPyLua
 # or 
-$ ipython notebook --profile lua
+$ ipython notebook --profile iPyLua
 ```
 
 ## TODO

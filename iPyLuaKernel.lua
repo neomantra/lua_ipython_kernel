@@ -20,10 +20,28 @@ if #arg ~= 1 then
   os.exit(-1)
 end
 
+do
+  -- Setting iPyLua in the registry allow to extend this implementation with
+  -- specifications due to other Lua modules. For instance, APRIL-ANN uses this
+  -- variable to configure how to encode images, plots, matrices, ... As well
+  -- as introducing a sort of inline documentation.
+  local reg = debug.getregistry()
+  reg.iPyLua = true
+end
+
 local json = require "iPyLua.dkjson"
 
 -- our kernel's state
-local kernel = {}
+local kernel = { execution_count=0 }
+
+local function next_execution_count()
+  kernel.execution_count = kernel.execution_count + 1
+  return kernel.execution_count
+end
+
+local function current_execution_count()
+  return kernel.execution_count
+end
 
 -- load connection object info from JSON file
 do
@@ -33,10 +51,13 @@ do
   connection_file:close()
 end
 
+local HMAC = ''
+
 local zmq = require 'lzmq'
 local zmq_poller = require 'lzmq.poller'
 local z_NOBLOCK, z_POLLIN = zmq.NOBLOCK, zmq.POLL_IN
 local z_RCVMORE, z_SNDMORE = zmq.RCVMORE, zmq.SNDMORE
+local zassert = zmq.assert
 
 local uuid = require 'iPyLua.uuid' -- TODO: randomseed or luasocket or something else
 
@@ -47,41 +68,55 @@ local username = os.getenv('USER') or "unknown"
 -- IPython Message ("ipmsg") functions
 
 local function ipmsg_to_table(parts)
-  local ipmsg = { ids = {}, blobs = {} }
+  local msg = { ids = {}, blobs = {} }
 
   local i = 1
   while i <= #parts and parts[i] ~= MSG_DELIM do
-    ipmsg.ids[#ipmsg.ids + 1] = parts[i]
+    msg.ids[#msg.ids + 1] = parts[i]
     i = i + 1
   end
   i = i + 1
-  ipmsg.hmac          = parts[i] ; i = i + 1 
-  ipmsg.header        = parts[i] ; i = i + 1 
-  ipmsg.parent_header = parts[i] ; i = i + 1 
-  ipmsg.metadata      = parts[i] ; i = i + 1 
-  ipmsg.content       = parts[i] ; i = i + 1 
+  msg.hmac          = parts[i] ; i = i + 1 
+  msg.header        = parts[i] ; i = i + 1 
+  msg.parent_header = parts[i] ; i = i + 1 
+  msg.metadata      = parts[i] ; i = i + 1 
+  msg.content       = parts[i] ; i = i + 1 
 
   while i <= #parts do
-    ipmsg.blobs[#ipmsg.blobs + 1] = parts[i]
+    msg.blobs[#msg.blobs + 1] = parts[i]
     i = i + 1
   end
   
-  return ipmsg
+  return msg
+end
+
+local session_id = uuid.new()
+local function ipmsg_header(msg_type)
+  return {
+    msg_id = uuid.new(),   -- TODO: randomness warning: uuid.new()
+    msg_type = msg_type,
+    username = username,
+    session = session_id,
+    version = '5.0',
+    date = os.date("%Y-%m-%dT%H:%M:%S"),
+  }
 end
 
 
-local function ipmsg_header(session, msg_type)
-  return json.encode({
-      msg_id = uuid.new(),   -- TODO: randomness warning: uuid.new()
-      username = username,
-      session = session,
-      msg_type = msg_type,
-      version = '5.0',
-  })
-end
-
-
-local function ipmsg_send(sock, ids, hmac, hdr, p_hdr, meta, content, blobs)
+local function ipmsg_send(sock, params)
+  local parent  = params.parent or {header={}}
+  local ids     = parent.ids or {}
+  local hdr     = json.encode(assert( params.header ))
+  local meta    = json.encode(params.meta or {})
+  local content = json.encode(params.content or {})
+  local blobs   = params.blob
+  -- print("IPMSG_SEND")
+  -- print("\tHEADER", hdr)
+  -- print("\tCONTENT", content)
+  --
+  local hmac  = HMAC
+  local p_hdr = json.encode(parent.header)
+  --
   if type(ids) == 'table' then
     for _, v in ipairs(ids) do
       sock:send(v, z_SNDMORE)
@@ -118,33 +153,178 @@ end
 
 -- environment where all code is executed
 local env_session
-local env_header
+local env_parent
 local env_source
-local function pubstr(str)
-  print("PUBPUB", str)
-  local header = ipmsg_header( env_session, 'display_data' )
-  local content = json.encode{
-    source = env_source,
-    data = { ['text/plain'] = str },
-    -- metadata = { ['text/plain'] = {} },
-  }
-  print("CONTENT", content)
-  ipmsg_send(kernel.iopub_sock, env_session, '', header, env_header, '{}', content)
+local function new_environment()
+  local function pubstr(str)
+    local header = ipmsg_header( 'pyout' )
+    local content = {
+      data = { ['text/plain'] = str },
+      execution_count = current_execution_count(),
+      metadata = {},
+    }
+    ipmsg_send(kernel.iopub_sock, {
+                 session = env_session,
+                 parent = env_parent,
+                 header = header,
+                 content = content
+    })
+  end
+
+  local env_G = {} for k,v in pairs(_G) do env_G[k] = v end
+  env_G.args = nil
+  env_G._G = nil
+  local env = setmetatable({}, { __index = env_G })
+  env._G = env
+  env._ENV = env
+  
+  env_G.print = function(...)
+    local str = table.concat(table.pack(...),"\t")
+    pubstr(str)
+  end
+
+  env_G.io.write = function(...)
+    local str = table.concat(table.pack(...))
+    pubstr(str)
+  end
+  return env
 end
-local env = {}
-for k,v in pairs(_G) do env[k] = v end
-env.args = nil
-env.print = function(...)
-  local str = table.concat(table.pack(...),"\t")
-  pubstr(str)
-end
-env.io.write = function(...)
-  local str = table.concat(table.pack(...))
-  pubstring(str)
-end
+local env = new_environment()
 
 local function add_return(code)
   return code
+end
+
+-------------------------------------------------------------------------------
+
+local function send_execute_reply(sock, parent, count)
+  local session = parent.header.session
+  local header = ipmsg_header( 'execute_reply' )
+  local content = {
+    status = 'ok',
+    execution_count = count,
+    payload = {},
+    user_expresions = {},
+  }
+  ipmsg_send(sock, {
+               session = session,
+               parent = parent,
+               header = header,
+               content = content,
+  })
+end
+
+local function send_busy_message(sock, parent)
+  local session = parent.header.session
+  local header  = ipmsg_header( 'status' )
+  local content = { execution_state='busy' }
+  ipmsg_send(sock, {
+               session = session,
+               parent = parent,
+               header = header,
+               content = content,
+  })
+end
+
+local function send_idle_message(sock, parent)
+  local session = parent.header.session
+  local header  = ipmsg_header( 'status' )
+  local content = { execution_state='idle' }
+  ipmsg_send(sock, {
+               session = session,
+               parent = parent,
+               header = header,
+               content = content,
+  })
+end
+
+local function execute_code(parent)
+  local session = parent.header.session
+  local code = parent.content.code
+  env_parent  = parent
+  env_session = session
+  env_source  = code
+  local f,msg = load(add_return(code), nil, nil, env)
+  local out = f()
+  if out then
+    -- TODO: show output of the function
+  end
+end
+
+local function send_pyin_message(sock, parent, count)
+  local session = parent.header.session
+  local header  = ipmsg_header( 'pyin' )
+  local content = { code=parent.content.code,
+                    execution_count = count, }
+  ipmsg_send(sock, {
+               session = session,
+               parent = parent,
+               header = header,
+               content = content,
+  }) 
+end
+
+-- implemented routes
+local shell_routes = {
+  kernel_info_request = function(sock, parent)
+    local session = parent.header.session
+    local header = ipmsg_header( 'kernel_info_reply' )
+    local major,minor = _VERSION:match("(%d+)%.(%d+)")
+    local content = {
+      protocol_version = {4, 0},
+      language_version = {tonumber(major), tonumber(minor)},
+      language = 'iPyLua',
+    }
+    ipmsg_send(sock, {
+                 session=session,
+                 parent=parent,
+                 header=header,
+                 content=content,
+    })
+  end,
+
+  execute_request = function(sock, parent)
+    local count = next_execution_count()
+    parent.content = json.decode(parent.content)
+    --
+    send_busy_message(kernel.iopub_sock, parent)
+    
+    local out = execute_code(parent)
+    send_pyin_message(kernel.iopub_sock, parent, count)
+    
+    send_execute_reply(sock, parent, count)
+    send_idle_message(kernel.iopub_sock, parent)
+  end,
+
+  shutdown_request = function(sock, parent)
+    print("SHUTDOWN")
+    parent.content = json.decode(parent.content)
+    --
+    send_busy_message(sock, parent)
+    local session = parent.header.session
+    local header  = ipmsg_header( 'shutdown_reply' )
+    local content = parent.content
+    ipmsg_send(sock, {
+                 session=session,
+                 parent=parent,
+                 header=header,
+                 content=content,
+    })
+    send_idle_message(kernel.iopub_sock, parent)
+    for _, v in ipairs(kernel_sockets) do
+      kernel[v.name]:close()
+    end
+    os.exit()
+  end,
+}
+
+do
+  local function dummy_function() end
+  setmetatable(shell_routes, {
+                 __index = function(self, key)
+                   return rawget(self,key) or dummy_function
+                 end,
+  })
 end
 
 -------------------------------------------------------------------------------
@@ -152,85 +332,30 @@ end
 
 local function on_hb_read( sock )
   -- read the data and send a pong
-  local data = assert( sock:recv(zmq.NOBLOCK) )
+  local data = zassert( sock:recv(zmq.NOBLOCK) )
   -- TODO: handle 'timeout' error
   sock:send('pong')
 end
 
 local function on_control_read( sock )
-  local data = assert( sock:recv(zmq.NOBLOCK) )
+  local data = zassert( sock:recv(zmq.NOBLOCK) )
   -- TODO: handle 'timeout' error
-  print("CTRL", data)
 end
 
 local function on_stdin_read( sock )
-  local data = assert( sock:recv(zmq.NOBLOCK) )
+  local data = zassert( sock:recv(zmq.NOBLOCK) )
   -- TODO: handle 'timeout' error
-  print("STDIN", data)
 end
 
 local function on_shell_read( sock )
   -- TODO: error handling
-  local ipmsg = assert( sock:recv_all() )
-  
+  local ipmsg = zassert( sock:recv_all() )  
   local msg = ipmsg_to_table(ipmsg)
-
-  for k, v in pairs(msg) do print(k,v) end
-
-  local header_obj = json.decode(msg.header)
-  if header_obj.msg_type == 'kernel_info_request' then
-    local header = ipmsg_header( header_obj.session, 'kernel_info_reply' )
-    local major,minor = _VERSION:match("(%d+)%.(%d+)")
-    local content = json.encode({
-        protocol_version = {4, 0},
-        language_version = {tonumber(major), tonumber(minor)},
-        language = 'lua',
-    })
-
-    ipmsg_send(sock, header_obj.session, '', header, msg.header, '{}', content)
-
-  elseif header_obj.msg_type == 'execute_request' then
-
-    local header = ipmsg_header( header_obj.session, 'execute_reply' )
-    kernel.execution_count = kernel.execution_count + 1
-    local content = json.encode({
-        status = 'ok',
-        execution_count = kernel.execution_count,
-        payload = {},
-        user_expresions = {},
-    })
-
-    ipmsg_send(sock, header_obj.session, '', header, msg.header, '{}', content)
-    
-    local header = ipmsg_header( header_obj.session, 'status' )
-    local content = json.encode{ execution_state='busy' }
-    ipmsg_send(kernel.iopub_sock, header_obj.session, '',
-               header, '{}', '{}', content)
-    local msg_content = json.decode(msg.content)
-    local code = msg_content.code
-    env_header  = msg.header
-    env_session = header_obj.session
-    env_source  = code
-    local f = load(add_return(code), nil, nil, env)
-    local out = f()
-    if out then
-      -- TODO: show output of the function
-    end
-    
-    local content = json.encode{ execution_state='idle' }
-    ipmsg_send(kernel.iopub_sock, header_obj.session, '',
-               header, '{}', '{}', content)
-  end
-
+  -- for k, v in pairs(msg) do print(k,v) end
+  msg.header = json.decode(msg.header)
+  -- print("REQUEST FOR KEY", msg.header.msg_type)
+  shell_routes[msg.header.msg_type](sock, msg)
 end
-
-local function on_iopub_read( sock )
-  -- read the data and send a pong
-  local data = assert( sock:recv(zmq.NOBLOCK) )
-  -- TODO: handle timeout error
-  print("PUB", data)
-end
-
 
 -------------------------------------------------------------------------------
 -- SETUP
@@ -247,7 +372,7 @@ local z_ctx = zmq.context()
 local z_poller = zmq_poller(#kernel_sockets)
 for _, v in ipairs(kernel_sockets) do
   -- TODO: error handling in here
-  local sock = assert( z_ctx:socket(v.sock_type) )
+  local sock = zassert( z_ctx:socket(v.sock_type) )
 
   local conn_obj = kernel.connection_obj
   local addr = string.format('%s://%s:%s',
@@ -255,15 +380,14 @@ for _, v in ipairs(kernel_sockets) do
                              conn_obj.ip,
                              conn_obj[v.port..'_port'])
 
-  assert( sock:bind(addr) )
-
-  z_poller:add(sock, zmq.POLLIN, v.handler)
+  zassert( sock:bind(addr) )
+  
+  if v.name ~= 'iopub_sock' then -- avoid polling from iopub
+    z_poller:add(sock, zmq.POLLIN, v.handler)
+  end
 
   kernel[v.name] = sock
 end
-
-kernel.execution_count = 0
-
 
 -------------------------------------------------------------------------------
 -- POLL then SHUTDOWN
