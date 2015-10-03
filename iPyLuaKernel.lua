@@ -20,13 +20,24 @@ if #arg ~= 1 then
   os.exit(-1)
 end
 
+local output_filters = {}
+local help_functions = {}
 do
   -- Setting iPyLua in the registry allow to extend this implementation with
   -- specifications due to other Lua modules. For instance, APRIL-ANN uses this
   -- variable to configure how to encode images, plots, matrices, ... As well
   -- as introducing a sort of inline documentation.
+  --
+  -- To extend iPyLua output you need to stack into registry
+  -- iPyLua.output_filters new functions which receive an object and return a
+  -- data table as expected by IPython, that is, a data table with pairs of {
+  -- [mime_type] = representation, ... } followed by the metadata table
+  -- (optional).
   local reg = debug.getregistry()
-  reg.iPyLua = true
+  reg.iPyLua = {
+    output_filters = output_filters,
+    help_functions = help_functions,
+  }
 end
 
 local json = require "iPyLua.dkjson"
@@ -152,16 +163,17 @@ end
 -------------------------------------------------------------------------------
 
 -- environment where all code is executed
+local new_environment
 local env_session
 local env_parent
 local env_source
-local function new_environment()
-  local function pubstr(str)
+do
+  local pyout = function(data, metadata)
     local header = ipmsg_header( 'pyout' )
     local content = {
-      data = { ['text/plain'] = str },
+      data = assert( data ),
       execution_count = current_execution_count(),
-      metadata = {},
+      metadata = metadata or {},
     }
     ipmsg_send(kernel.iopub_sock, {
                  session = env_session,
@@ -170,26 +182,90 @@ local function new_environment()
                  content = content
     })
   end
-
-  local env_G = {} for k,v in pairs(_G) do env_G[k] = v end
-  env_G.args = nil
-  env_G._G = nil
-  local env = setmetatable({}, { __index = env_G })
-  env._G = env
-  env._ENV = env
   
-  env_G.print = function(...)
-    local str = table.concat(table.pack(...),"\t")
-    pubstr(str)
+  local stringfy = function(v)
+    local v_str = tostring(v)
+    return not v_str:find("\n") and v_str or type(v)
   end
+  
+  local MAX = 10
+  table.insert(output_filters,
+               function(obj, MAX)
+                 local tt,footer = type(obj)
+                 if tt == "table" then
+                   local tbl = {}
+                   do
+                     local max = false
+                     for k,v in ipairs(obj) do
+                       table.insert(tbl, ("\t[%d] = %s,"):format(k,stringfy(v)))
+                       if k >= MAX then max=true break end
+                     end
+                     if max then table.insert(tbl, "\t...") end
+                   end
+                   do
+                     local max = false
+                     local keys = {}
+                     for k,v in pairs(obj) do
+                       if type(k) ~= "number" then keys[#keys+1] = k end
+                     end
+                     table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
+                     for i,k in ipairs(keys) do
+                       table.insert(tbl, ("\t[%q] = %s,"):format(stringfy(k),
+                                                                 stringfy(obj[k])))
+                       if i >= MAX then max=true break end
+                     end
+                     if max then table.insert(tbl, "\t...") end
+                     footer = ("# %s with %d array part, %d hash part"):format(tostring(obj), #obj, #keys)
+                   end
+                   table.insert(tbl, footer)
+                   return { ["text/plain"]=table.concat(tbl, "\n") }
+                 else
+                   return { ["text/plain"]=tostring(obj) }
+                 end
+  end)
+  
+  local function print_obj(obj, MAX)
+    for i=#output_filters,1,-1 do
+      local data,metadata = output_filters[i](obj, MAX)
+      if data then pyout(data,metadata) return true end
+    end
+    return false
+  end
+  
+  function new_environment()
+    local env_G,env = {},{}
+    for k,v in pairs(_G) do env_G[k] = v end
+    env_G.args = nil
+    env_G._G   = env
+    env_G._ENV = env
+    local env_G = setmetatable(env_G, { __index = _G })
+    local env = setmetatable(env, { __index = env_G })
+    
+    env_G.print = function(...)
+      if select('#',...) == 1 then
+        if print_obj(..., MAX) then return end
+      end
+      local args = table.pack(...)
+      for i=1,#args do args[i]=stringfy(args[i]) end
+      local str = table.concat(args,"\t")
+      pyout({ ["text/plain"] = str })
+    end
 
-  env_G.io.write = function(...)
-    local str = table.concat(table.pack(...))
-    pubstr(str)
+    env_G.io.write = function(...)
+      local args = table.pack(...)
+      for i=1,#args do args[i]=stringfy(args[i]) end
+      local str = table.concat(table.pack(...))
+      pyout({ ["text/plain"] = str })
+    end
+    
+    env_G.vars = function()
+      print_obj(env, math.huge)
+    end
+    
+    return env,env_G
   end
-  return env
 end
-local env = new_environment()
+local env,env_G = new_environment()
 
 local function add_return(code)
   return code
@@ -197,15 +273,20 @@ end
 
 -------------------------------------------------------------------------------
 
-local function send_execute_reply(sock, parent, count)
+local function send_execute_reply(sock, parent, count, status, err)
   local session = parent.header.session
   local header = ipmsg_header( 'execute_reply' )
   local content = {
-    status = 'ok',
+    status = status or 'ok',
     execution_count = count,
     payload = {},
     user_expresions = {},
   }
+  if status=="error" then
+    content.ename = err
+    content.evalue = ''
+    content.traceback = {err}
+  end
   ipmsg_send(sock, {
                session = session,
                parent = parent,
@@ -241,13 +322,31 @@ end
 local function execute_code(parent)
   local session = parent.header.session
   local code = parent.content.code
+  if not code or #code==0 then return end
   env_parent  = parent
   env_session = session
   env_source  = code
-  local f,msg = load(add_return(code), nil, nil, env)
-  local out = f()
-  if out then
-    -- TODO: show output of the function
+  if code:find("^%s-%?") then
+    for i=#help_functions,1,-1 do
+      local data,metadata = help_functions[i](code:gsub("^%s-%?", ""))
+      if data then pyout(data,metadata) return true end
+    end
+    return nil,"Documentation not found"
+  else
+    if code:sub(1,1) == "=" then code = "return " .. code:sub(2) end
+    local ok,err = true,nil
+    local f,msg = load(code, nil, nil, env)
+    if f then
+      local out = table.pack(xpcall(f, debug.traceback))
+      if not out[1] then
+        ok,err = nil,out[2]
+      elseif #out > 1 then
+        env.print(table.unpack(out, 2))
+      end
+    else
+      ok,err = nil,msg
+    end
+    return ok,err
   end
 end
 
@@ -255,6 +354,19 @@ local function send_pyin_message(sock, parent, count)
   local session = parent.header.session
   local header  = ipmsg_header( 'pyin' )
   local content = { code=parent.content.code,
+                    execution_count = count, }
+  ipmsg_send(sock, {
+               session = session,
+               parent = parent,
+               header = header,
+               content = content,
+  }) 
+end
+
+local function send_pyerr_message(sock, parent, count, err)
+  local session = parent.header.session
+  local header  = ipmsg_header( 'pyerr' )
+  local content = { ename = err, evalue = '', traceback = {err},
                     execution_count = count, }
   ipmsg_send(sock, {
                session = session,
@@ -289,10 +401,15 @@ local shell_routes = {
     --
     send_busy_message(kernel.iopub_sock, parent)
     
-    local out = execute_code(parent)
+    local ok,err = execute_code(parent)
     send_pyin_message(kernel.iopub_sock, parent, count)
-    
-    send_execute_reply(sock, parent, count)
+    if ok then
+      send_execute_reply(sock, parent, count)
+    else
+      err = err or "Unknown error"
+      send_pyerr_message(kernel.iopub_sock, parent, count, err)
+      send_execute_reply(sock, parent, count, "error", err)
+    end
     send_idle_message(kernel.iopub_sock, parent)
   end,
 
