@@ -164,11 +164,12 @@ end
 -------------------------------------------------------------------------------
 
 local function help(str)
+  if #str == 0 then str = nil end
   for i=#help_functions,1,-1 do
     local data,metadata = help_functions[i](str)
     if data then pyout(data,metadata) return true end
   end
-  return nil,"Documentation not found"
+  return nil,("Documentation not found%s"):format(str and " for object: "..str or "")
 end
 
 -- environment where all code is executed
@@ -361,7 +362,7 @@ local function execute_code(parent)
   env_session = session
   env_source  = code
   if code:find("%?+\n?$") or code:find("^%?+") then
-    return help(code:match("%?*([^?]*)%?*\n?$"))
+    return help(code:match("^%?*([^?\n]*)%?*\n?$"))
   else
     if code:sub(1,1) == "%" then
       code = ("_G[%q]()"):format(code:gsub("\n",""))
