@@ -360,8 +360,8 @@ local function execute_code(parent)
   env_parent  = parent
   env_session = session
   env_source  = code
-  if code:find("%?+\n?$") then
-    return help(code:gsub("%?+\n?$", ""))
+  if code:find("%?+\n?$") or code:find("^%?+") then
+    return help(code:match("%?*([^?]*)%?*\n?$"))
   else
     if code:sub(1,1) == "%" then
       code = ("_G[%q]()"):format(code:gsub("\n",""))
