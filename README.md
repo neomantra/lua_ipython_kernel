@@ -1,4 +1,4 @@
-1;3803;0c1# iPyLua: Lua IPython Kernel
+# iPyLua: Lua IPython Kernel
 
 This is a kernel to support Lua with [IPython](http://ipython.org).  It is pure
 Lua and should work with both Lua and LuaJIT.
