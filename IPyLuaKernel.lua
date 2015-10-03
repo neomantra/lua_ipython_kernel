@@ -228,9 +228,9 @@ do
                      footer = ("# %s with %d array part, %d hash part"):format(tostring(obj), #obj, #keys)
                    end
                    table.insert(tbl, footer)
-                   return { ["text/plain"]=table.concat(tbl, "\n") }
+                   return { ["text/plain"]=table.concat(tbl, "\n").."\n" }
                  else
-                   return { ["text/plain"]=tostring(obj) }
+                   return { ["text/plain"]=tostring(obj).."\n" }
                  end
   end)
   
@@ -258,14 +258,14 @@ do
       local args = table.pack(...)
       for i=1,#args do args[i]=stringfy(args[i]) end
       local str = table.concat(args,"\t")
-      pyout({ ["text/plain"] = str })
+      pyout({ ["text/plain"] = str.."\n" })
     end
 
     env_G.io.write = function(...)
       local args = table.pack(...)
       for i=1,#args do args[i]=stringfy(args[i]) end
       local str = table.concat(table.pack(...))
-      pyout({ ["text/plain"] = str })
+      pyout({ ["text/plain"] = str.."\n" })
     end
     
     env_G.vars = function()
