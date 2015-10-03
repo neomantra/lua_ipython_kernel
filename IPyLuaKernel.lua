@@ -1,5 +1,5 @@
 --[[
-  iPyLua
+  IPyLua
   
   Copyright (c) 2015 Francisco Zamora-Martinez. Simplified, less deps and making
   it work.
@@ -23,31 +23,31 @@ end
 local output_filters = {}
 local help_functions = {}
 do
-  -- Setting iPyLua in the registry allow to extend this implementation with
+  -- Setting IPyLua in the registry allow to extend this implementation with
   -- specifications due to other Lua modules. For instance, APRIL-ANN uses this
   -- variable to configure how to encode images, plots, matrices, ... As well
   -- as introducing a sort of inline documentation.
   --
-  -- To extend iPyLua output you need to stack into registry
-  -- iPyLua.output_filters new functions which receive an object and return a
+  -- To extend IPyLua output you need to stack into registry
+  -- IPyLua.output_filters new functions which receive an object and return a
   -- data table as expected by IPython, that is, a data table with pairs of {
   -- [mime_type] = representation, ... } followed by the metadata table
   -- (optional).
   local reg = debug.getregistry()
-  reg.iPyLua = {
+  reg.IPyLua = {
     output_filters = output_filters,
     help_functions = help_functions,
   }
 end
 
-local json = require "iPyLua.dkjson"
+local json = require "IPyLua.dkjson"
 local zmq  = require 'lzmq'
 local zmq_poller = require 'lzmq.poller'
 local z_NOBLOCK, z_POLLIN = zmq.NOBLOCK, zmq.POLL_IN
 local z_RCVMORE, z_SNDMORE = zmq.RCVMORE, zmq.SNDMORE
 local zassert = zmq.assert
 
-local uuid = require 'iPyLua.uuid' -- TODO: randomseed or luasocket or something else
+local uuid = require 'IPyLua.uuid' -- TODO: randomseed or luasocket or something else
 
 local HMAC = ''
 local MSG_DELIM = '<IDS|MSG>'
@@ -418,7 +418,7 @@ local shell_routes = {
     local content = {
       protocol_version = {4, 0},
       language_version = {tonumber(major), tonumber(minor)},
-      language = 'iPyLua',
+      language = 'IPyLua',
     }
     ipmsg_send(sock, {
                  session=session,

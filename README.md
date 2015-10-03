@@ -1,4 +1,4 @@
-# iPyLua: Lua IPython Kernel
+# IPyLua: Lua IPython Kernel
 
 This is a kernel to support Lua with [IPython](http://ipython.org).  It is pure
 Lua and should work with both Lua and LuaJIT.
@@ -24,12 +24,12 @@ The installation process is janky right now.
  * Create a profile with IPython:
 
 ```
-$ ipython profile create iPyLua
+$ ipython profile create IPyLua
 ```
 
- * Modify the profile's `ipython_config.py` to use iPyLua.  This
- will be at either `~/.config/ipython/profile_iPyLua/ipython_config.py` or
- `~/.ipython/profile_iPyLua/ipython_config.py`:
+ * Modify the profile's `ipython_config.py` to use IPyLua.  This
+ will be at either `~/.config/ipython/profile_IPyLua/ipython_config.py` or
+ `~/.ipython/profile_IPyLua/ipython_config.py`:
 
 ```Python
 # Configuration file for ipython.
@@ -38,7 +38,7 @@ c = get_config()
    
 c.KernelManager.kernel_cmd = [
     "luajit", # select your Lua interpreter here (lua5.2, lua5.1, luajit)
-    "iPyLua/iPyLuaKernel.lua",  # probably need full path
+    "IPyLua/IPyLuaKernel.lua",  # probably need full path
     "{connection_file}"
 ]
    
@@ -50,9 +50,9 @@ c.Session.keyfile = b''
  * Invoke IPython with this Lua kernel:
 
 ```
-$ ipython console --profile iPyLua
+$ ipython console --profile IPyLua
 # or 
-$ ipython notebook --profile iPyLua
+$ ipython notebook --profile IPyLua
 ```
 
 ## TODO
@@ -82,10 +82,10 @@ And of course thanks to the [IPython folks ](http://ipython.org/citing.html).
 
 ## LICENSE
 
-**iPyLua** is distributed under the
+**IPyLua** is distributed under the
   [MIT License](http://opensource.org/licenses/mit-license.php).
 
-> iPyLua
+> IPyLua
 > Copyright (c) 2015 Francisco Zamora-Martinez. Simplified, less deps and making
 > it work.
 >
