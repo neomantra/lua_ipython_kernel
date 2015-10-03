@@ -1,0 +1,29 @@
+# Emacs backups #
+#################
+*~
+\#*\#
+.\#*
+
+# Vim swap #
+*.swp
+# OS generated files #
+######################
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
+Thumbs.db
+
+# Emacs Clang autocompletion #
+##############################
+.clang-completion-error
+
+# Global tags #
+###############
+GPATH
+GRTAGS
+GSYMS
+GTAGS
