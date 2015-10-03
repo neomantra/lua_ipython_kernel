@@ -193,8 +193,9 @@ do
     })
   end
   
-  local stringfy = function(v)
+  local stringfy = function(v,use_quotes)
     local v_str = tostring(v)
+    if type(v) == "string" and use_quotes then v_str = ("%q"):format(v) end
     return not v_str:find("\n") and v_str or type(v)
   end
   
@@ -207,7 +208,7 @@ do
                    do
                      local max = false
                      for k,v in ipairs(obj) do
-                       table.insert(tbl, ("\t[%d] = %s,"):format(k,stringfy(v)))
+                       table.insert(tbl, ("\t[%d] = %s,"):format(k,stringfy(v,true)))
                        if k >= MAX then max=true break end
                      end
                      if max then table.insert(tbl, "\t...") end
@@ -220,8 +221,8 @@ do
                      end
                      table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
                      for i,k in ipairs(keys) do
-                       table.insert(tbl, ("\t[%q] = %s,"):format(stringfy(k),
-                                                                 stringfy(obj[k])))
+                       table.insert(tbl, ("\t[%s] = %s,"):format(stringfy(k,true),
+                                                                 stringfy(obj[k],true)))
                        if i >= MAX then max=true break end
                      end
                      if max then table.insert(tbl, "\t...") end
