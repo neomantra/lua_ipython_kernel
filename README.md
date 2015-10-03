@@ -82,7 +82,7 @@ And of course thanks to the [IPython folks ](http://ipython.org/citing.html).
 
 ## LICENSE
 
-**lua_ipython_kernel** is distributed under the
+**iPyLua** is distributed under the
   [MIT License](http://opensource.org/licenses/mit-license.php).
 
 > iPyLua
