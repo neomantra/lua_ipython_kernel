@@ -43,6 +43,7 @@ end
 local json = require "IPyLua.dkjson"
 local zmq  = require 'lzmq'
 local zmq_poller = require 'lzmq.poller'
+local zthreads = require "lzmq.threads"
 local z_NOBLOCK, z_POLLIN = zmq.NOBLOCK, zmq.POLL_IN
 local z_RCVMORE, z_SNDMORE = zmq.RCVMORE, zmq.SNDMORE
 local zassert = zmq.assert
@@ -204,7 +205,7 @@ do
                function(obj, MAX)
                  local tt,footer = type(obj)
                  if tt == "table" then
-                   local tbl = {}
+                   local tbl = { "{" }
                    do
                      local max = false
                      for k,v in ipairs(obj) do
@@ -226,12 +227,21 @@ do
                        if i >= MAX then max=true break end
                      end
                      if max then table.insert(tbl, "\t...") end
-                     footer = ("# %s with %d array part, %d hash part"):format(tostring(obj), #obj, #keys)
+                     footer = ("-- %s with %d array part, %d hash part"):format(tostring(obj), #obj, #keys)
                    end
+                   table.insert(tbl, "}")
                    table.insert(tbl, footer)
-                   return { ["text/plain"]=table.concat(tbl, "\n").."\n" }
+                   local str = table.concat(tbl, "\n")
+                   return {
+                     ["text/plain"]=str.."\n",
+                     ["text/html"]=('<code id="ipylua_static_code">%s</code>'):format(str),
+                   }
                  else
-                   return { ["text/plain"]=tostring(obj).."\n" }
+                   local str = tostring(obj)
+                   return {
+                     ["text/plain"]=str.."\n",
+                     ["text/html"]=('<pre>%s</pre>'):format(str),
+                   }
                  end
   end)
   
@@ -482,10 +492,7 @@ end
 -- ZMQ Read Handlers
 
 local function on_hb_read( sock )
-  -- read the data and send a pong
-  local data = zassert( sock:recv(zmq.NOBLOCK) )
-  -- TODO: handle 'timeout' error
-  sock:send('pong')
+
 end
 
 local function on_control_read( sock )
@@ -512,7 +519,7 @@ end
 -- SETUP
 
 kernel_sockets = {
-  { name = 'heartbeat_sock', sock_type = zmq.REP,    port = 'hb',      handler = on_hb_read },
+  -- { name = 'heartbeat_sock', sock_type = zmq.REP,    port = 'hb',      handler = on_hb_read },
   { name = 'control_sock',   sock_type = zmq.ROUTER, port = 'control', handler = on_control_read },
   { name = 'stdin_sock',     sock_type = zmq.ROUTER, port = 'stdin',   handler = on_stdin_read },
   { name = 'shell_sock',     sock_type = zmq.ROUTER, port = 'shell',   handler = on_shell_read },
@@ -522,23 +529,56 @@ kernel_sockets = {
 local z_ctx = zmq.context()
 local z_poller = zmq_poller(#kernel_sockets)
 for _, v in ipairs(kernel_sockets) do
-  -- TODO: error handling in here
-  local sock = zassert( z_ctx:socket(v.sock_type) )
+  if v.name ~= "heartbeat_sock" then
+    -- TODO: error handling in here
+    local sock = zassert( z_ctx:socket(v.sock_type) )
 
-  local conn_obj = kernel.connection_obj
-  local addr = string.format('%s://%s:%s',
-                             conn_obj.transport,
-                             conn_obj.ip,
-                             conn_obj[v.port..'_port'])
+    local conn_obj = kernel.connection_obj
+    local addr = string.format('%s://%s:%s',
+                               conn_obj.transport,
+                               conn_obj.ip,
+                               conn_obj[v.port..'_port'])
 
-  zassert( sock:bind(addr) )
-  
-  if v.name ~= 'iopub_sock' then -- avoid polling from iopub
-    z_poller:add(sock, zmq.POLLIN, v.handler)
+    zassert( sock:bind(addr) )
+    
+    if v.name ~= 'iopub_sock' then -- avoid polling from iopub
+      z_poller:add(sock, zmq.POLLIN, v.handler)
+    end
+
+    kernel[v.name] = sock
   end
-
-  kernel[v.name] = sock
 end
+
+-- heartbeat is controlled through an independent thread, allowing the main
+-- thread to manage interactive commands given by the IPython
+local thread = zthreads.run(z_ctx,
+                            function(conn_obj, require, string, print)
+                              local zmq   = require "lzmq"
+                              local z_ctx = require"lzmq.threads".get_parent_ctx()
+                              local zassert = zmq.assert
+                              local v = {
+                                name = 'heartbeat_sock',
+                                sock_type = zmq.REP,
+                                port = 'hb',
+                              }
+                              local sock = zassert( z_ctx:socket(v.sock_type) )
+                              local addr = string.format('%s://%s:%s',
+                                                         conn_obj.transport,
+                                                         conn_obj.ip,
+                                                         conn_obj[v.port..'_port'])
+                              zassert( sock:bind(addr) )
+                              while true do
+                                -- read the data and send a pong
+                                local data,msg = sock:recv()
+                                if msg ~= "timeout" then
+                                  if not data then break end
+                                  -- TODO: handle 'timeout' error
+                                  sock:send('pong')
+                                end
+                              end
+                            end,
+                            kernel.connection_obj, require, string, print)
+thread:start(true,true)
 
 -------------------------------------------------------------------------------
 -- POLL then SHUTDOWN
@@ -550,3 +590,4 @@ for _, v in ipairs(kernel_sockets) do
   kernel[v.name]:close()
 end
 z_ctx:term()
+thread:join()

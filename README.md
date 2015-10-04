@@ -47,6 +47,9 @@ c.Session.key = b''
 c.Session.keyfile = b''
 ```
 
+ * Copy the content of `config` folder into your
+   `~/.ipython/profile_IPyLua/static/custom/` folder.
+
  * Invoke IPython with this Lua kernel:
 
 ```
