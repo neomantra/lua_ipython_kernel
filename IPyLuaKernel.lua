@@ -164,16 +164,8 @@ end
 
 -------------------------------------------------------------------------------
 
-local function help(str)
-  if #str == 0 then str = nil end
-  for i=#help_functions,1,-1 do
-    local data,metadata = help_functions[i](str)
-    if data then pyout(data,metadata) return true end
-  end
-  return nil,("Documentation not found%s"):format(str and " for object: "..str or "")
-end
-
 -- environment where all code is executed
+local help
 local new_environment
 local env_session
 local env_parent
@@ -252,6 +244,14 @@ do
     end
     return false
   end
+
+  function help(obj)
+    for i=#help_functions,1,-1 do
+      local data,metadata = help_functions[i](obj)
+      if data then pyout(data,metadata) return end
+    end
+    pyout({ ["text/plain"] = "No documentation found" })
+  end
   
   function new_environment()
     local env_G,env = {},{}
@@ -283,7 +283,7 @@ do
       print_obj(env, math.huge)
     end
 
-    env_G.help = function(str) help(str) end
+    env_G.help = help
     
     env_G["%quickref"] = function()
       local tbl = {
@@ -373,7 +373,8 @@ local function execute_code(parent)
   env_session = session
   env_source  = code
   if code:find("%?+\n?$") or code:find("^%?+") then
-    return help(code:match("^%?*([^?\n]*)%?*\n?$"))
+    help(env[code:match("^%?*([^?\n]*)%?*\n?$")])
+    return true
   else
     if code:sub(1,1) == "%" then
       code = ("_G[%q]()"):format(code:gsub("\n",""))
