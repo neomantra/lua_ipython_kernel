@@ -484,6 +484,7 @@ local shell_routes = {
     local session = parent.header.session
     local header = ipmsg_header( 'complete_reply' )
     local content = do_completion(parent.content.code or parent.content.line,
+                                  parent.content.text,
                                   parent.content.cursor_pos,
                                   env_G, env, _ENV)
     ipmsg_send(sock, {

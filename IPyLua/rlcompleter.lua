@@ -37,7 +37,7 @@ local function get_index(mt)
 end
 
 -- This function needs to be called to complete current input line
-local function do_completion(line, cursor_pos, env_G, env, _G)
+local function do_completion(line, text, cursor_pos, env_G, env, _G)
   local line = line:match("([^\n]*)[\n]?$")
   -- Extract the last word.
   local word=line:match( last_word_pattern ) or ""
@@ -62,7 +62,9 @@ local function do_completion(line, cursor_pos, env_G, env, _G)
     if lfs then
       local path, name = str:match("(.*)[\\/]+(.*)")
       path = (path or ".") .. "/"
+      if str:sub(1,1) == "/" then path = "/" .. path end
       name = name or str
+      if not lfs.attributes(path) then return end
       for f in lfs.dir(path) do
         if (lfs.attributes(path .. f) or {}).mode == 'directory' then
           add(f .. "/")
@@ -128,9 +130,7 @@ local function do_completion(line, cursor_pos, env_G, env, _G)
         end
       end
     end
-    if #matches == 0 then
-      add_globals()
-    end
+    if #matches == 0 and #word == #line then add_globals() end
   end
   
   -- This complex function tries to simplify the input line, by removing
@@ -179,12 +179,19 @@ local function do_completion(line, cursor_pos, env_G, env, _G)
   local str, expr, sep = simplify_expression(line:sub(1, endpos))
   contextual_list(expr, sep, str)
   table.sort(matches)
+  -- rebuild the list of matches to prepend all required characters
+  if text ~= "" then
+    local prefix = line:match("(.*)"..word)
+    if prefix then
+      for i,v in ipairs(matches) do matches[i] = prefix .. v end
+    end
+  end
   return {
     status = "ok",
     matches = matches,
-    cursor_start = 1,
-    cursor_end = cursor_pos,
     matched_text = word,
+    -- cursor_start = 1,
+    -- cusor_end = cursor_pos,
     metadata = {},
   }
 end
