@@ -7,12 +7,11 @@
   Original name and copyright: lua_ipython_kernel 
   Copyright (c) 2013 Evan Wies.  All rights reserved.
 
-
   Released under the MIT License, see the LICENSE file.
 
   https://github.com/neomantra/lua_ipython_kernel
 
-  usage: lua ipython_kernel.lua `connection_file`
+  usage: lua IPyLuaKernel.lua CONNECTION_FILENAME
 --]]
 
 if #arg ~= 1 then
@@ -40,6 +39,7 @@ do
   }
 end
 
+local do_completion = require "IPyLua.rlcompleter".do_completion
 local json = require "IPyLua.dkjson"
 local zmq  = require 'lzmq'
 local zmq_poller = require 'lzmq.poller'
@@ -234,7 +234,7 @@ do
                    local str = table.concat(tbl, "\n")
                    return {
                      ["text/plain"]=str.."\n",
-                     ["text/html"]=('<code id="ipylua_static_code">%s</code>'):format(str),
+                     ["text/html"]=('<pre id="ipylua_static_code">%s</pre>'):format(str),
                    }
                  else
                    local str = tostring(obj)
@@ -380,6 +380,7 @@ local function execute_code(parent)
     end
     if code:sub(1,1) == "=" then code = "return " .. code:sub(2) end
     local ok,err = true,nil
+    -- TODO: reimplement it to be Lua 5.1 compatible 
     local f,msg = load(code, nil, nil, env)
     if f then
       local out = table.pack(xpcall(f, debug.traceback))
@@ -477,12 +478,36 @@ local shell_routes = {
     end
     os.exit()
   end,
+
+  complete_request = function(sock, parent)
+    parent.content = json.decode(parent.content)
+    local session = parent.header.session
+    local header = ipmsg_header( 'complete_reply' )
+    local content = do_completion(parent.content.code or parent.content.line,
+                                  parent.content.cursor_pos,
+                                  env_G, env)
+    ipmsg_send(sock, {
+                 session=session,
+                 parent=parent,
+                 header=header,
+                 content=content,
+    })
+  end,
+
+  history_request = function(sock, parent)
+    print("history_requested but not implemented")
+  end,
+
+  comm_open = function(sock, parent)
+    print("comm_open but not implemented")
+  end,
 }
 
 do
   local function dummy_function() end
   setmetatable(shell_routes, {
                  __index = function(self, key)
+                   print(key)
                    return rawget(self,key) or dummy_function
                  end,
   })
