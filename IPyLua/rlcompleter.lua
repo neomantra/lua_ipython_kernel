@@ -37,18 +37,22 @@ local function get_index(mt)
 end
 
 -- This function needs to be called to complete current input line
-local function do_completion(line, cursor_pos, env_G, env)
+local function do_completion(line, cursor_pos, env_G, env, _G)
   local line = line:match("([^\n]*)[\n]?$")
   -- Extract the last word.
   local word=line:match( last_word_pattern ) or ""
   local startpos,endpos=1,#(line:match(endpos_pattern) or "")
   
   -- Helper function registering possible completion words, verifying matches.
+  local matches_set = {}
   local matches = {}
   local function add(value)
     value = tostring(value)
-    if value:match("^" .. word) then
-      matches[#matches + 1] = value
+    if not matches_set[value] then
+      if value:match("^" .. word) then
+        matches_set[value] = true
+        matches[#matches + 1] = value
+      end
     end
   end
   
@@ -72,14 +76,9 @@ local function do_completion(line, cursor_pos, env_G, env)
   -- This function is called in a context where a keyword or a global
   -- variable can be inserted. Local variables cannot be listed!
   local function add_globals()
-    for _, k in ipairs(keywords) do
-      add(k)
-    end
-    for k in pairs(env_G) do
-      add(k)
-    end
-    for k in pairs(env) do
-      add(k)
+    for _, k in ipairs(keywords) do add(k) end
+    for i,tbl in ipairs{env, env_G, _G} do
+      for k in pairs(tbl) do add(k) end
     end
   end
 
