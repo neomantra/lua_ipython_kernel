@@ -130,7 +130,7 @@ local function do_completion(line, text, cursor_pos, env_G, env, _G)
         end
       end
     end
-    if #matches == 0 and #word == #line then add_globals() end
+    if #matches == 0 then add_globals() end
   end
   
   -- This complex function tries to simplify the input line, by removing
