@@ -165,7 +165,6 @@ end
 -------------------------------------------------------------------------------
 
 -- environment where all code is executed
-local help
 local new_environment
 local env_session
 local env_parent
@@ -245,7 +244,7 @@ do
     return false
   end
 
-  function help(obj)
+  local function help(obj)
     for i=#help_functions,1,-1 do
       local data,metadata = help_functions[i](obj)
       if data then pyout(data,metadata) return end
@@ -261,6 +260,19 @@ do
     env_G._ENV = env
     local env_G = setmetatable(env_G, { __index = _G })
     local env = setmetatable(env, { __index = env_G })
+    
+    env_G.pyout = function(data,metadata)
+      metadata = metadata or {}
+      assert(type(data) == "table", "Needs a table as first argument")
+      assert(type(metadata) == "table", "Needs nil or table as second argument")
+      for k,v in pairs(data) do
+        assert(type(v) == "string", "Expected dictionary of strings")
+      end
+      for k,v in pairs(metadata) do
+        assert(type(v) == "string", "Expected dictionary of strings")
+      end
+      pyout(data,metadata)
+    end
     
     env_G.print = function(...)
       if select('#',...) == 1 then
@@ -297,6 +309,7 @@ do
         "                object is given, the fancy version will be used",
         "                only if it fits in one line, otherwise the type",
         "                of the object will be shown.",
+        "pyout(data)  -> Allow low-level print to IPython",
         "vars()       -> Shows all global variables declared by the user.",
       }
       print_obj(table.concat(tbl,"\n"))
@@ -373,7 +386,7 @@ local function execute_code(parent)
   env_session = session
   env_source  = code
   if code:find("%?+\n?$") or code:find("^%?+") then
-    help(env[code:match("^%?*([^?\n]*)%?*\n?$")])
+    env.help(env[code:match("^%?*([^?\n]*)%?*\n?$")])
     return true
   else
     if code:sub(1,1) == "%" then
