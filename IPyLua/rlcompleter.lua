@@ -1,12 +1,13 @@
 --[[
   IPyLua
   
-  Copyright (c) 2015 Francisco Zamora-Martinez.
-
+  Copyright (c) 2015 Francisco Zamora-Martinez. Simplified, less deps and making
+  it work.
+  
+  https://github.com/pakozm/IPyLua
+  
   Released under the MIT License, see the LICENSE file.
-
-  https://github.com/neomantra/lua_ipython_kernel
-
+  
   usage: lua IPyLuaKernel.lua CONNECTION_FILENAME
 --]]
 
@@ -15,7 +16,7 @@
 
 local ok,lfs = pcall(require, "lfs") if not ok then lfs = nil end
 
-local type = type
+local type = luatype or type
 
 -- The list of Lua keywords
 local keywords = {

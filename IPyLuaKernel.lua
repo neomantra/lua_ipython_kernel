@@ -3,14 +3,15 @@
   
   Copyright (c) 2015 Francisco Zamora-Martinez. Simplified, less deps and making
   it work.
-
-  Original name and copyright: lua_ipython_kernel 
+  
+  https://github.com/pakozm/IPyLua
+  
+  Original name and copyright: lua_ipython_kernel, 
   Copyright (c) 2013 Evan Wies.  All rights reserved.
-
-  Released under the MIT License, see the LICENSE file.
-
   https://github.com/neomantra/lua_ipython_kernel
 
+  Released under the MIT License, see the LICENSE file.
+  
   usage: lua IPyLuaKernel.lua CONNECTION_FILENAME
 --]]
 
@@ -19,8 +20,9 @@ if #arg ~= 1 then
   os.exit(-1)
 end
 
-local output_filters = {}
+local output_functions = {}
 local help_functions = {}
+local plot_functions = {}
 do
   -- Setting IPyLua in the registry allow to extend this implementation with
   -- specifications due to other Lua modules. For instance, APRIL-ANN uses this
@@ -28,15 +30,22 @@ do
   -- as introducing a sort of inline documentation.
   --
   -- To extend IPyLua output you need to stack into registry
-  -- IPyLua.output_filters new functions which receive an object and return a
+  -- IPyLua.output_functions new functions which receive an object and return a
   -- data table as expected by IPython, that is, a data table with pairs of {
   -- [mime_type] = representation, ... } followed by the metadata table
   -- (optional).
   local reg = debug.getregistry()
   reg.IPyLua = {
-    output_filters = output_filters,
+    output_functions = output_functions,
     help_functions = help_functions,
+    plot_functions = plot_functions,
   }
+end
+local function lookup_function_for_object(obj, stack, ...)
+  for i=#stack,1,-1 do
+    local result = table.pack( output_functions[i](obj, ...) )
+    if result[1] then return table.unpack(result) end
+  end
 end
 
 local do_completion = require "IPyLua.rlcompleter".do_completion
@@ -192,7 +201,7 @@ do
   end
   
   local MAX = 10
-  table.insert(output_filters,
+  table.insert(output_functions,
                function(obj, MAX)
                  local tt,footer = type(obj)
                  if tt == "table" then
@@ -235,20 +244,29 @@ do
                    }
                  end
   end)
+
+  local function draw(...)
+    local result = {}
+    local args = table.pack(...)
+    for i=1,#args do
+      local v = args[i]
+      v.x = lookup_function_for_object( (assert(v.x, "Needs x field")),
+                                        plot_functions )
+      v.y = lookup_function_for_object( (assert(v.y, "Needs y field")),
+                                        plot_functions )
+      
+    end
+  end
   
   local function print_obj(obj, MAX)
-    for i=#output_filters,1,-1 do
-      local data,metadata = output_filters[i](obj, MAX)
-      if data then pyout(data,metadata) return true end
-    end
+    local data,metadata = lookup_function_for_object(obj, output_functions, MAX)
+    if data then pyout(data,metadata) return true end
     return false
   end
 
   local function help(obj)
-    for i=#help_functions,1,-1 do
-      local data,metadata = help_functions[i](obj)
-      if data then pyout(data,metadata) return end
-    end
+    local data,metadata = lookup_function_for_object(obj, help_functions)
+    if data then pyout(data,metadata) return end
     pyout({ ["text/plain"] = "No documentation found" })
   end
   
@@ -406,6 +424,7 @@ local function execute_code(parent)
     else
       ok,err = nil,msg
     end
+    collectgarbage("collect")
     return ok,err
   end
 end
@@ -592,7 +611,7 @@ end
 -- heartbeat is controlled through an independent thread, allowing the main
 -- thread to manage interactive commands given by the IPython
 local thread = zthreads.run(z_ctx,
-                            function(conn_obj, require, string, print)
+                            function(conn_obj)
                               local zmq   = require "lzmq"
                               local z_ctx = require"lzmq.threads".get_parent_ctx()
                               local zassert = zmq.assert
@@ -617,7 +636,7 @@ local thread = zthreads.run(z_ctx,
                                 end
                               end
                             end,
-                            kernel.connection_obj, require, string, print)
+                            kernel.connection_obj)
 thread:start(true,true)
 
 -------------------------------------------------------------------------------
