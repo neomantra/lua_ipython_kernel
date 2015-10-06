@@ -519,18 +519,24 @@ local shell_routes = {
 
   complete_request = function(sock, parent)
     parent.content = json.decode(parent.content)
-    local session = parent.header.session
-    local header = ipmsg_header( 'complete_reply' )
-    local content = do_completion(parent.content.code or parent.content.line,
-                                  parent.content.text,
-                                  parent.content.cursor_pos,
-                                  env_G, env, _ENV)
-    ipmsg_send(sock, {
-                 session=session,
-                 parent=parent,
-                 header=header,
+    local ok,content = pcall(do_completion,
+                             parent.content.code or parent.content.line,
+                             parent.content.text,
+                             parent.content.cursor_pos,
+                             env_G, env, _ENV)
+    if not ok then
+      print("Error at do_completion")
+      print(content)
+    else
+      local session = parent.header.session
+      local header = ipmsg_header( 'complete_reply' )
+      ipmsg_send(sock, {
+                   session=session,
+                   parent=parent,
+                   header=header,
                  content=content,
-    })
+      })
+    end
   end,
 
   history_request = function(sock, parent)
