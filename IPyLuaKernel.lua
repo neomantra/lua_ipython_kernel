@@ -20,9 +20,9 @@ if #arg ~= 1 then
   os.exit(-1)
 end
 
-local output_functions = {}
-local help_functions = {}
-local plot_functions = {}
+local output_functions
+local help_functions
+local plot_functions
 do
   -- Setting IPyLua in the registry allow to extend this implementation with
   -- specifications due to other Lua modules. For instance, APRIL-ANN uses this
@@ -35,12 +35,17 @@ do
   -- [mime_type] = representation, ... } followed by the metadata table
   -- (optional).
   local reg = debug.getregistry()
+  reg.IPyLua = reg.IPyLua or {}
+  output_functions = reg.IPyLua.output_functions or {}
+  help_functions   = reg.IPyLua.help_functions or {}
+  plot_functions   = reg.IPyLua.plot_functions or {}
   reg.IPyLua = {
     output_functions = output_functions,
-    help_functions = help_functions,
-    plot_functions = plot_functions,
+    help_functions   = help_functions,
+    plot_functions   = plot_functions,
   }
 end
+
 local function lookup_function_for_object(obj, stack, ...)
   for i=#stack,1,-1 do
     local result = table.pack( output_functions[i](obj, ...) )
@@ -201,49 +206,49 @@ do
   end
   
   local MAX = 10
-  table.insert(output_functions,
-               function(obj, MAX)
-                 local tt,footer = type(obj)
-                 if tt == "table" then
-                   local tbl = { "{" }
-                   do
-                     local max = false
-                     for k,v in ipairs(obj) do
-                       table.insert(tbl, ("\t[%d] = %s,"):format(k,stringfy(v,true)))
-                       if k >= MAX then max=true break end
-                     end
-                     if max then table.insert(tbl, "\t...") end
-                   end
-                   do
-                     local max = false
-                     local keys = {}
-                     for k,v in pairs(obj) do
-                       if type(k) ~= "number" then keys[#keys+1] = k end
-                     end
-                     table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
-                     for i,k in ipairs(keys) do
-                       table.insert(tbl, ("\t[%s] = %s,"):format(stringfy(k,true),
-                                                                 stringfy(obj[k],true)))
-                       if i >= MAX then max=true break end
-                     end
-                     if max then table.insert(tbl, "\t...") end
-                     footer = ("-- %s with %d array part, %d hash part"):format(tostring(obj), #obj, #keys)
-                   end
-                   table.insert(tbl, "}")
-                   table.insert(tbl, footer)
-                   local str = table.concat(tbl, "\n")
-                   return {
-                     ["text/plain"]=str.."\n",
-                     ["text/html"]=('<pre id="ipylua_static_code">%s</pre>'):format(str),
-                   }
-                 else
-                   local str = tostring(obj)
-                   return {
-                     ["text/plain"]=str.."\n",
-                     ["text/html"]=('<pre>%s</pre>'):format(str),
-                   }
-                 end
-  end)
+  local basic_output_function = function(obj, MAX)
+    local tt,footer = type(obj)
+    if tt == "table" then
+      local tbl = { "{" }
+      do
+        local max = false
+        for k,v in ipairs(obj) do
+          table.insert(tbl, ("\t[%d] = %s,"):format(k,stringfy(v,true)))
+          if k >= MAX then max=true break end
+        end
+        if max then table.insert(tbl, "\t...") end
+      end
+      do
+        local max = false
+        local keys = {}
+        for k,v in pairs(obj) do
+          if type(k) ~= "number" then keys[#keys+1] = k end
+        end
+        table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
+        for i,k in ipairs(keys) do
+          table.insert(tbl, ("\t[%s] = %s,"):format(stringfy(k,true),
+                                                    stringfy(obj[k],true)))
+          if i >= MAX then max=true break end
+        end
+        if max then table.insert(tbl, "\t...") end
+        footer = ("-- %s with %d array part, %d hash part"):format(tostring(obj), #obj, #keys)
+      end
+      table.insert(tbl, "}")
+      table.insert(tbl, footer)
+      local str = table.concat(tbl, "\n")
+      return {
+        ["text/plain"]=str.."\n",
+        ["text/html"]=('<pre id="ipylua_static_code">%s</pre>'):format(str),
+      }
+    else
+      local str = tostring(obj)
+      return {
+        ["text/plain"]=str.."\n",
+        ["text/html"]=('<pre>%s</pre>'):format(str),
+      }
+    end
+  end
+  table.insert(output_functions, 1, basic_output_function)
 
   local function draw(...)
     local result = {}
