@@ -289,7 +289,13 @@ do
     return data
   end
   table.insert(help_functions, 1, basic_help_function)
-
+  
+  local function pcall_wrap(...)
+    local ok,msg = pcall(...)
+    if not ok then print(msg) return false end
+    return true
+  end
+  
   local function draw(...)
     local result = {}
     local args = table.pack(...)
@@ -305,13 +311,15 @@ do
   
   local function print_obj(obj, MAX)
     local data,metadata = lookup_function_for_object(obj, output_functions, MAX)
-    if data then pyout(data,metadata) return true end
+    if data then return pcall_wrap(pyout,data,metadata) end
     return false
   end
 
   local function help(obj, ...)
     local data,metadata = lookup_function_for_object(obj, help_functions, ...)
-    if data then pyout(data,metadata) return end
+    if data then
+      if pcall_wrap(pyout,data,metadata) then return end
+    end
     pyout({ ["text/plain"] = "No documentation found" })
   end
   
@@ -328,12 +336,6 @@ do
       metadata = metadata or {}
       assert(type(data) == "table", "Needs a table as first argument")
       assert(type(metadata) == "table", "Needs nil or table as second argument")
-      for k,v in pairs(data) do
-        assert(type(v) == "string", "Expected dictionary of strings")
-      end
-      for k,v in pairs(metadata) do
-        assert(type(v) == "string", "Expected dictionary of strings")
-      end
       pyout(data,metadata)
     end
     
@@ -460,7 +462,9 @@ local function execute_code(parent)
   env_session = session
   env_source  = code
   if code:find("%?+\n?$") or code:find("^%?+") then
-    env.help(env[code:match("^%?*([^?\n]*)%?*\n?$")])
+    local x = load("return "..code:match("^%?*([^?\n]*)%?*\n?$"), nil, nil, env)
+    if x then x = x() end
+    env.help(x)
     return true
   else
     if code:sub(1,1) == "%" then
