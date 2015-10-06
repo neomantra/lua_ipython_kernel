@@ -39,7 +39,7 @@ end
 
 -- This function needs to be called to complete current input line
 local function do_completion(line, text, cursor_pos, env_G, env, _G)
-  local line = line:match("([^\n]*)[\n]?$")
+  local line = line:sub(1,cursor_pos):match("([^\n]*)[\n]?$")
   -- Extract the last word.
   local word=line:match( last_word_pattern ) or ""
   local startpos,endpos=1,#(line:match(endpos_pattern) or "")
