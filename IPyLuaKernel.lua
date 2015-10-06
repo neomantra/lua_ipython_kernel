@@ -48,8 +48,10 @@ end
 
 local function lookup_function_for_object(obj, stack, ...)
   for i=#stack,1,-1 do
-    local result = table.pack( output_functions[i](obj, ...) )
-    if result[1] then return table.unpack(result) end
+    local result = table.pack( pcall(stack[i], obj, ...) )
+    if result[1] and result[2] then
+      return table.unpack(result, 2)
+    end
   end
 end
 
@@ -249,6 +251,44 @@ do
     end
   end
   table.insert(output_functions, 1, basic_output_function)
+  
+  local basic_help_function = function(obj, verbosity)
+    local html = {
+      "<h3>IPyLua help</h3>",
+      "<table style=\"border:0px\">",
+      "<tr><th>Key</th><th>Value</th></tr>",
+      ("<tr><td style=\"margin-right:4px\">LuaType</td><td>%s</td></tr>"):format(type(obj)),
+    }
+
+    local plain = {
+      ("LuaType:   %s\n"):format(type(obj)),
+    }
+    
+    if type(obj) == "function" then
+      local info = debug.getinfo(obj)
+      table.insert(html, ("<tr><td style=\"margin-right:4px\">NumParams</td><td>%d</td></tr>"):format(info.isvararg and "..." or info.nparams))
+      table.insert(html, ("<tr><td style=\"margin-right:4px\">What</td><td>%s</td></tr>"):format(info.what))
+      table.insert(html, ("<tr><td style=\"margin-right:4px\">Nups</td><td>%s</td></tr>"):format(info.nups))
+
+      table.insert(plain, ("NumParams: %d"):format(info.isvararg and "..." or info.nparams))
+      table.insert(plain, ("What:      %s"):format(info.what))
+      table.insert(plain, ("Nups:      %s"):format(info.nups))
+    elseif type(obj) == "table" then
+      table.insert(html, ("<tr><td style=\"margin-right:4px\">Length</td><td>%d</td></tr>"):format(#obj))
+      table.insert(plain, ("Length:    %d"):format(#obj))
+    else
+      table.insert(html, ("<tr><td style=\"margin-right:4px\">ToString</td><td>%s</td></tr>"):format(tostring(obj)))
+      table.insert(plain, ("ToString:  %s"):format(tostring(obj)))
+    end
+    
+    table.insert(html, "</table>")
+    local data = {
+      ["text/html"]  = table.concat(html),
+      ["text/plain"] = table.concat(plain),
+    }
+    return data
+  end
+  table.insert(help_functions, 1, basic_help_function)
 
   local function draw(...)
     local result = {}
@@ -269,8 +309,8 @@ do
     return false
   end
 
-  local function help(obj)
-    local data,metadata = lookup_function_for_object(obj, help_functions)
+  local function help(obj, ...)
+    local data,metadata = lookup_function_for_object(obj, help_functions, ...)
     if data then pyout(data,metadata) return end
     pyout({ ["text/plain"] = "No documentation found" })
   end
@@ -297,6 +337,17 @@ do
       pyout(data,metadata)
     end
     
+    env_G.pyget = function(obj)
+      return lookup_function_for_object(obj, output_functions, MAX)
+    end
+    
+    env_G.pystr = function(...)
+      local args = table.pack(...)
+      for i=1,#args do args[i]=stringfy(args[i]) end
+      local str = table.concat(args,"\t")
+      pyout({ ["text/plain"] = str.."\n" })
+    end
+      
     env_G.print = function(...)
       if select('#',...) == 1 then
         if print_obj(..., MAX) then return end
