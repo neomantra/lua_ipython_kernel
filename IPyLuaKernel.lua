@@ -277,7 +277,7 @@ do
       table.insert(html, ("<tr><td style=\"margin-right:4px\">Length</td><td>%d</td></tr>"):format(#obj))
       table.insert(plain, ("Length:    %d"):format(#obj))
     else
-      table.insert(html, ("<tr><td style=\"margin-right:4px\">ToString</td><td>%s</td></tr>"):format(tostring(obj)))
+      table.insert(html, ("<tr><td style=\"margin-right:4px\">ToString</td><td><pre>%s</pre></td></tr>"):format(tostring(obj)))
       table.insert(plain, ("ToString:  %s"):format(tostring(obj)))
     end
     
