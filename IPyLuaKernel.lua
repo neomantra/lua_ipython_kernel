@@ -547,8 +547,13 @@ local shell_routes = {
   end,
 
   execute_request = function(sock, parent)
-    local count = next_execution_count()
     parent.content = json.decode(parent.content)
+    local count
+    if parent.content.store_history then
+      count = next_execution_count()
+    else
+      count = current_execution_count()
+    end
     --
     send_busy_message(kernel.iopub_sock, parent)
     
