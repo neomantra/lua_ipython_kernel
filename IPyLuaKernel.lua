@@ -51,6 +51,8 @@ local function lookup_function_for_object(obj, stack, ...)
     local result = table.pack( pcall(stack[i], obj, ...) )
     if result[1] and result[2] then
       return table.unpack(result, 2)
+    else
+      print(result[2])
     end
   end
 end
@@ -264,17 +266,37 @@ do
     }
     
     if type(obj) == "function" then
+      local definition = {}
       local info = debug.getinfo(obj)
-      definition = {"... = funcname","("}
-      if info.isvararg then
-        table.insert(definition, "...")
-      else
-        local args = {}
-        for i=1,info.nparams do table.insert(args, "arg"..i) end
-        table.insert(definition, table.concat(args,","))
+      if info.what == "Lua" and info.source and info.linedefined then
+        local source = info.source
+        local first  = info.linedefined
+        local last   = info.lastlinedefined
+        local iterator
+        if source:sub(1,1) == "@" then
+          iterator = table.pack( io.lines(source:sub(2)) )
+        else
+          iterator = table.pack( source:gmatch("([^\r\n]+)") )
+        end
+        local k=1
+        for line in table.unpack( iterator ) do
+          if first == k then definition = line break end
+          k=k+1
+        end
       end
-      table.insert(definition, ")")
-      definition = table.concat(definition)
+      
+      if #definition == 0 then
+        definition = {"... = funcname","("}
+        if info.isvararg then
+          table.insert(definition, "...")
+        else
+          local args = {}
+          for i=1,info.nparams do table.insert(args, "arg"..i) end
+          table.insert(definition, table.concat(args,","))
+        end
+        table.insert(definition, ")")
+        definition = table.concat(definition)
+      end
 
       table.insert(html, ("<tr><td style=\"margin-right:4px\">Def.</td><td>%s</td></tr>"):format(definition))
       table.insert(html, ("<tr><td style=\"margin-right:4px\">NumParams</td><td>%s</td></tr>"):format(info.isvararg and "..." or info.nparams))
@@ -285,9 +307,11 @@ do
       table.insert(plain, ("NumParams: %s\n"):format(info.isvararg and "..." or info.nparams))
       table.insert(plain, ("What:      %s\n"):format(info.what))
       table.insert(plain, ("Nups:      %s\n"):format(info.nups))
+      
     elseif type(obj) == "table" then
       table.insert(html, ("<tr><td style=\"margin-right:4px\">Length</td><td>%d</td></tr>"):format(#obj))
       table.insert(plain, ("Length:    %d\n"):format(#obj))
+      
     else
       table.insert(html, ("<tr><td style=\"margin-right:4px\">ToString</td><td><pre>%s</pre></td></tr>"):format(tostring(obj)))
       table.insert(plain, ("ToString:  %s\n"):format(tostring(obj)))
@@ -302,8 +326,8 @@ do
   end
   table.insert(help_functions, 1, basic_help_function)
   
-  local function pcall_wrap(...)
-    local ok,msg = pcall(...)
+  local function pcall_wrap(func,...)
+    local ok,msg = xpcall(func,debug.traceback,...)
     if not ok then print(msg) return false end
     return true
   end
@@ -636,20 +660,37 @@ local shell_routes = {
     local definition
     local argspec
     if type(x) == "function" then
-      definition = {"... = ",oname,"("}
       local info = debug.getinfo(x)
-      argspec = { args = {} }
-      if info.isvararg then
-        argspec.args[1] = "..."
-        table.insert(definition, "...")
-      else
-        for i=1,info.nparams do
-          local name = "arg"..i
-          argspec.args[i] = name
-          table.insert(definition, name)
+      if info.what == "Lua" and info.source and info.linedefined then
+        local source = info.source
+        local first  = info.linedefined
+        local iterator
+        if source:sub(1,1) == "@" then
+          iterator = table.pack( io.lines(source:sub(2)) )
+        else
+          iterator = table.pack( source:gmatch("([^\r\n]+)") )
         end
+        local k=1
+        for line in table.unpack( iterator ) do
+          if first == k then definition = {line} break end
+          k=k+1
+        end
+      else
+        definition = {"... = ",oname,"("}
+        
+        argspec = { args = {} }
+        if info.isvararg then
+          argspec.args[1] = "..."
+          table.insert(definition, "...")
+        else
+          local args = {}
+          for i=1,info.nparams do
+            args[i] = "arg"..i
+          end
+          table.insert(definition, table.concat(args,","))
+        end
+        table.insert(definition, ")")
       end
-      table.insert(definition, ")")
     end
     local content = {
       oname = oname,
