@@ -1,6 +1,6 @@
 [submodule "external/lua-llthreads2"]
 	path = external/lua-llthreads2
-	url = git@github.com:moteus/lua-llthreads2.git
+	url = https://github.com/moteus/lua-llthreads2.git
 [submodule "external/lzmq"]
 	path = external/lzmq
 	url = https://github.com/zeromq/lzmq.git
