@@ -22,7 +22,8 @@ $([IPython.events]).on("app_initialized.NotebookApp", function () {
     $('head').append('<link rel="stylesheet" type="text/css" href="custom.css">');
     
     IPython.CodeCell.options_default['cm_config']['mode'] = 'lua';
-
+    IPython.CodeCell.options_default['cm_config']['indentUnit'] = 2;
+    
     CodeMirror.requireMode('lua', function() {
 	IPython.OutputArea.prototype._should_scroll = function(){return false}
         cells = IPython.notebook.get_cells();
