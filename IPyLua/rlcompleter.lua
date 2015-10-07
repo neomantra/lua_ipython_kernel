@@ -182,8 +182,9 @@ local function do_completion(line, text, cursor_pos, env_G, env, _G)
   table.sort(matches)
   -- rebuild the list of matches to prepend all required characters
   if text ~= "" then
-    local prefix = line:match("(.*)"..word)
-    if prefix then
+    if expr then
+      local prefix = expr .. (sep or "")
+      word = prefix .. word
       for i,v in ipairs(matches) do matches[i] = prefix .. v end
     end
   end

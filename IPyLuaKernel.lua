@@ -36,13 +36,13 @@ do
   -- (optional).
   local reg = debug.getregistry()
   reg.IPyLua = reg.IPyLua or {}
-  output_functions = reg.IPyLua.output_functions or {}
-  help_functions   = reg.IPyLua.help_functions or {}
-  plot_functions   = reg.IPyLua.plot_functions or {}
+  output_functions     = reg.IPyLua.output_functions or {}
+  help_functions       = reg.IPyLua.help_functions or {}
+  plot_functions       = reg.IPyLua.plot_functions or {}
   reg.IPyLua = {
-    output_functions = output_functions,
-    help_functions   = help_functions,
-    plot_functions   = plot_functions,
+    output_functions     = output_functions,
+    help_functions       = help_functions,
+    plot_functions       = plot_functions,
   }
 end
 
@@ -524,7 +524,7 @@ local shell_routes = {
     local content = {
       protocol_version = {4, 0},
       language_version = {tonumber(major), tonumber(minor)},
-      language = 'IPyLua',
+      language = 'lua',
     }
     ipmsg_send(sock, {
                  session=session,
@@ -601,6 +601,48 @@ local shell_routes = {
   comm_open = function(sock, parent)
     print("comm_open but not implemented")
   end,
+  
+  object_info_request = function(sock, parent)
+    parent.content = json.decode(parent.content)
+    local session = parent.header.session
+    local header = ipmsg_header( 'object_info_reply' )
+    local oname = parent.content.oname
+    -- TODO: handle detail_level
+    local len
+    local x = load("return "..oname, nil, nil, env)
+    if x then
+      ok,x = pcall(f)
+      ok,len = pcall(function() return #x end)
+      if not ok then len = nil end
+    end
+    local argspec
+    if type(x) == "function" then
+      local info = debug.getinfo(x)
+      argspec = { args = {} }
+      if info.isvararg then
+        argspec.args[1] = "..."
+      else
+        for i=1,info.nparams do argspec.args[i] = "arg"..i end
+      end
+    end
+    local content = {
+      oname = oname,
+      found = (x~=nil),
+      ismagic = false,
+      isalias = false,
+      namespace = 'global',
+      type_name = type(x),
+      string_form = stringfy(x),
+      length = len,
+      argspec = argspec,
+    }
+    ipmsg_send(sock, {
+                 session=session,
+                 parent=parent,
+                 header=header,
+                 content=content,
+    })
+  end,  
 }
 
 do
