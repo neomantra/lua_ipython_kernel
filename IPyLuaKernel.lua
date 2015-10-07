@@ -179,6 +179,11 @@ end
 
 
 -------------------------------------------------------------------------------
+local stringfy = function(v,use_quotes)
+  local v_str = tostring(v)
+  if type(v) == "string" and use_quotes then v_str = ("%q"):format(v) end
+  return not v_str:find("\n") and v_str or type(v)
+end
 
 -- environment where all code is executed
 local new_environment
@@ -199,12 +204,6 @@ do
                  header = header,
                  content = content
     })
-  end
-  
-  local stringfy = function(v,use_quotes)
-    local v_str = tostring(v)
-    if type(v) == "string" and use_quotes then v_str = ("%q"):format(v) end
-    return not v_str:find("\n") and v_str or type(v)
   end
   
   local MAX = 10
@@ -266,21 +265,34 @@ do
     
     if type(obj) == "function" then
       local info = debug.getinfo(obj)
-      table.insert(html, ("<tr><td style=\"margin-right:4px\">NumParams</td><td>%d</td></tr>"):format(info.isvararg and "..." or info.nparams))
+      definition = {"... = funcname","("}
+      if info.isvararg then
+        table.insert(definition, "...")
+      else
+        local args = {}
+        for i=1,info.nparams do table.insert(args, "arg"..i) end
+        table.insert(definition, table.concat(args,","))
+      end
+      table.insert(definition, ")")
+      definition = table.concat(definition)
+
+      table.insert(html, ("<tr><td style=\"margin-right:4px\">Def.</td><td>%s</td></tr>"):format(definition))
+      table.insert(html, ("<tr><td style=\"margin-right:4px\">NumParams</td><td>%s</td></tr>"):format(info.isvararg and "..." or info.nparams))
       table.insert(html, ("<tr><td style=\"margin-right:4px\">What</td><td>%s</td></tr>"):format(info.what))
       table.insert(html, ("<tr><td style=\"margin-right:4px\">Nups</td><td>%s</td></tr>"):format(info.nups))
 
-      table.insert(plain, ("NumParams: %d"):format(info.isvararg and "..." or info.nparams))
-      table.insert(plain, ("What:      %s"):format(info.what))
-      table.insert(plain, ("Nups:      %s"):format(info.nups))
+      table.insert(plain, ("Def.:      %s\n"):format(definition))
+      table.insert(plain, ("NumParams: %s\n"):format(info.isvararg and "..." or info.nparams))
+      table.insert(plain, ("What:      %s\n"):format(info.what))
+      table.insert(plain, ("Nups:      %s\n"):format(info.nups))
     elseif type(obj) == "table" then
       table.insert(html, ("<tr><td style=\"margin-right:4px\">Length</td><td>%d</td></tr>"):format(#obj))
-      table.insert(plain, ("Length:    %d"):format(#obj))
+      table.insert(plain, ("Length:    %d\n"):format(#obj))
     else
       table.insert(html, ("<tr><td style=\"margin-right:4px\">ToString</td><td><pre>%s</pre></td></tr>"):format(tostring(obj)))
-      table.insert(plain, ("ToString:  %s"):format(tostring(obj)))
+      table.insert(plain, ("ToString:  %s\n"):format(tostring(obj)))
     end
-    
+
     table.insert(html, "</table>")
     local data = {
       ["text/html"]  = table.concat(html),
@@ -603,6 +615,7 @@ local shell_routes = {
   end,
   
   object_info_request = function(sock, parent)
+    print("object_info_request")
     parent.content = json.decode(parent.content)
     local session = parent.header.session
     local header = ipmsg_header( 'object_info_reply' )
@@ -611,19 +624,28 @@ local shell_routes = {
     local len
     local x = load("return "..oname, nil, nil, env)
     if x then
-      ok,x = pcall(f)
+      ok,x = pcall(x)
+      if not ok then x = nil end
       ok,len = pcall(function() return #x end)
       if not ok then len = nil end
     end
+    local definition
     local argspec
     if type(x) == "function" then
+      definition = {"... = ",oname,"("}
       local info = debug.getinfo(x)
       argspec = { args = {} }
       if info.isvararg then
         argspec.args[1] = "..."
+        table.insert(definition, "...")
       else
-        for i=1,info.nparams do argspec.args[i] = "arg"..i end
+        for i=1,info.nparams do
+          local name = "arg"..i
+          argspec.args[i] = name
+          table.insert(definition, name)
+        end
       end
+      table.insert(definition, ")")
     end
     local content = {
       oname = oname,
@@ -635,7 +657,12 @@ local shell_routes = {
       string_form = stringfy(x),
       length = len,
       argspec = argspec,
+      definition = definition and table.concat(definition) or nil,
     }
+    if x then
+      local data = lookup_function_for_object(x, help_functions)
+      if data then content.docstring = data["text/plain"] end
+    end
     ipmsg_send(sock, {
                  session=session,
                  parent=parent,
