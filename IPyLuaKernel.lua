@@ -51,8 +51,6 @@ local function lookup_function_for_object(obj, stack, ...)
     local result = table.pack( pcall(stack[i], obj, ...) )
     if result[1] and result[2] then
       return table.unpack(result, 2)
-    else
-      print(result[2])
     end
   end
 end
