@@ -1,9 +1,20 @@
-function checkDOMChange() {
-    $("#ipylua_static_code").each(CodeMirror.fromTextArea)
-        .attr("id", "highlighted_ipylua_static_code");
-    setTimeout( checkDOMChange, 500 );
-}
-checkDOMChange();
+// function checkDOMChange() {
+//     $("#ipylua_static_code").each(function() {
+//         var $this = $(this),
+//             $code = $this.html();
+//         $this.empty();
+//         var myCodeMirror = CodeMirror(this, {
+//             value: $code,
+//             mode: 'lua',
+//             lineNumbers: false,
+//             readOnly: true
+//         });
+//         /*CodeMirror.fromTextArea*/
+//     })
+//         .attr("id", "highlighted_ipylua_static_code");
+//     setTimeout( checkDOMChange, 500 );
+// }
+// checkDOMChange();
 
 $([IPython.events]).on('notebook_loaded.Notebook', function(){
     // add here logic that should be run once per **notebook load**
