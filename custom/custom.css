@@ -38,6 +38,8 @@ a {color: #8fa1b3;}
 /* comment out this line to bring the toolbar back */
 /* div#maintoolbar, div#header {display: none !important;} */
 
+div.navbar {color:white;}
+
 div#notebook {border-top: none;}
 
 div.input_prompt {color: #ab7967;}
