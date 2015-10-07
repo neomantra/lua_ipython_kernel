@@ -615,7 +615,6 @@ local shell_routes = {
   end,
   
   object_info_request = function(sock, parent)
-    print("object_info_request")
     parent.content = json.decode(parent.content)
     local session = parent.header.session
     local header = ipmsg_header( 'object_info_reply' )
