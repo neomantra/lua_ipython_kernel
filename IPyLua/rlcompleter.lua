@@ -56,13 +56,15 @@ local function do_completion(line, text, cursor_pos, env_G, env, _G)
       end
     end
   end
-  
+
+  local filenames_path
   -- This function does the same job as the default completion of readline,
   -- completing paths and filenames.
   local function filename_list(str)
     if lfs then
       local path, name = str:match("(.*)[\\/]+(.*)")
       path = (path or ".") .. "/"
+      filenames_path = path
       if str:sub(1,1) == "/" then path = "/" .. path end
       name = name or str
       if not lfs.attributes(path) then return end
@@ -131,7 +133,9 @@ local function do_completion(line, text, cursor_pos, env_G, env, _G)
         end
       end
     end
-    if #matches == 0 then add_globals() end
+    if #matches == 0 then
+      if not sep or sep~="." then add_globals() end
+    end
   end
   
   -- This complex function tries to simplify the input line, by removing
@@ -182,7 +186,10 @@ local function do_completion(line, text, cursor_pos, env_G, env, _G)
   table.sort(matches)
   -- rebuild the list of matches to prepend all required characters
   if text ~= "" then
-    if sep ~= "." then
+    if filenames_path then
+      expr = filenames_path
+      sep = ""
+    elseif sep ~= "." then
       expr = line:match("([^%(%)%[%]%,%:><=%+%-%*%^'\\\"])*"..word.."$")
       sep = ""
     end
