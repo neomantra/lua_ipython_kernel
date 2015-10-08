@@ -20,6 +20,8 @@ if #arg ~= 1 then
   os.exit(-1)
 end
 
+local type = luatype or type
+
 local output_functions
 local help_functions
 local plot_functions
@@ -209,38 +211,52 @@ do
   local MAX = 10
   local basic_output_function = function(obj, MAX)
     local tt,footer = type(obj)
-    if tt == "table" then
-      local tbl = { "{" }
-      do
-        local max = false
-        for k,v in ipairs(obj) do
-          table.insert(tbl, ("\t[%d] = %s,"):format(k,stringfy(v,true)))
-          if k >= MAX then max=true break end
+    if (tt == "table" or tt == "userdata") then
+      local mt = getmetatable(obj)
+      if mt and mt.ipylua_show then
+        return mt.ipylua_show(obj)
+        
+      elseif mt and mt.__tostring then
+        local str = tostring(obj)
+        return {
+          ["text/plain"]=str.."\n",
+          ["text/html"]=('<pre>%s</pre>'):format(str),
+        }
+        
+      elseif tt == "table" then
+        local tbl = { "{" }
+        do
+          local max = false
+          for k,v in ipairs(obj) do
+            table.insert(tbl, ("\t[%d] = %s,"):format(k,stringfy(v,true)))
+            if k >= MAX then max=true break end
+          end
+          if max then table.insert(tbl, "\t...") end
         end
-        if max then table.insert(tbl, "\t...") end
+        do
+          local max = false
+          local keys = {}
+          for k,v in pairs(obj) do
+            if type(k) ~= "number" then keys[#keys+1] = k end
+          end
+          table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
+          for i,k in ipairs(keys) do
+            table.insert(tbl, ("\t[%s] = %s,"):format(stringfy(k,true),
+                                                      stringfy(obj[k],true)))
+            if i >= MAX then max=true break end
+          end
+          if max then table.insert(tbl, "\t...") end
+          footer = ("-- %s with %d array part, %d hash part"):format(tostring(obj), #obj, #keys)
+        end
+        table.insert(tbl, "}")
+        table.insert(tbl, footer)
+        local str = table.concat(tbl, "\n")
+        return {
+          ["text/plain"]=str.."\n",
+          ["text/html"]=('<pre id="ipylua_static_code">%s</pre>'):format(str),
+        }
       end
-      do
-        local max = false
-        local keys = {}
-        for k,v in pairs(obj) do
-          if type(k) ~= "number" then keys[#keys+1] = k end
-        end
-        table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
-        for i,k in ipairs(keys) do
-          table.insert(tbl, ("\t[%s] = %s,"):format(stringfy(k,true),
-                                                    stringfy(obj[k],true)))
-          if i >= MAX then max=true break end
-        end
-        if max then table.insert(tbl, "\t...") end
-        footer = ("-- %s with %d array part, %d hash part"):format(tostring(obj), #obj, #keys)
-      end
-      table.insert(tbl, "}")
-      table.insert(tbl, footer)
-      local str = table.concat(tbl, "\n")
-      return {
-        ["text/plain"]=str.."\n",
-        ["text/html"]=('<pre id="ipylua_static_code">%s</pre>'):format(str),
-      }
+      
     else
       local str = tostring(obj)
       return {
@@ -278,7 +294,7 @@ do
         end
         local k=1
         for line in table.unpack( iterator ) do
-          if first == k then definition = line break end
+          if first == k then definition = line:match("^%s*(.*)%s*$") break end
           k=k+1
         end
       end
@@ -330,19 +346,6 @@ do
     return true
   end
   
-  local function draw(...)
-    local result = {}
-    local args = table.pack(...)
-    for i=1,#args do
-      local v = args[i]
-      v.x = lookup_function_for_object( (assert(v.x, "Needs x field")),
-                                        plot_functions )
-      v.y = lookup_function_for_object( (assert(v.y, "Needs y field")),
-                                        plot_functions )
-      
-    end
-  end
-  
   local function show_obj(obj, MAX)
     local data,metadata = lookup_function_for_object(obj, output_functions, MAX)
     if data then return pcall_wrap(pyout,data,metadata) end
@@ -377,13 +380,6 @@ do
       return lookup_function_for_object(obj, output_functions, MAX)
     end
     
-    env_G.pystr = function(...)
-      local args = table.pack(...)
-      for i=1,#args do args[i]=stringfy(args[i]) end
-      local str = table.concat(args,"\t")
-      pyout({ ["text/plain"] = str.."\n" })
-    end
-      
     env_G.show = function(...)
       if select('#',...) == 1 then
         if show_obj(..., MAX) then return end
@@ -441,10 +437,13 @@ do
       local tbl = {
         "?            -> Introduction and overview.",
         "%quickref    -> This guide.",
+        "%guiref      -> Not implemented.",
         "help(object) -> Help about a given object.",
         "object?      -> Help about a given object.",
+        "print(...)   -> Standard Lua print function.",
         "show(...)    -> Show using a list of objects by columns (fancy output).",
-        "pyout(data)  -> Allow low-level print to IPython",
+        "pyget(obj)   -> Returns low-level data table for pyout() function.",
+        "pyout(data)  -> Allow printing low-level data to IPython",
         "vars()       -> Shows all global variables declared by the user.",
       }
       show_obj(table.concat(tbl,"\n"))
@@ -452,7 +451,7 @@ do
 
     env_G["%guiref"] = function()
       local tbl = {
-        "GUI reference not written.",
+        "GUI reference not implemented.",
       }
     end
     
@@ -460,10 +459,6 @@ do
   end
 end
 local env,env_G = new_environment()
-
-local function add_return(code)
-  return code
-end
 
 -------------------------------------------------------------------------------
 
@@ -521,7 +516,7 @@ local function execute_code(parent)
   env_session = session
   env_source  = code
   if code:find("%?+\n?$") or code:find("^%?+") then
-    local x = load("return "..code:match("^%?*([^?\n]*)%?*\n?$"), nil, nil, env)
+    local x = load("return "..(code:match("^%?*([^?\n]*)%?*\n?$") or "nil"), nil, nil, env)
     if x then x = x() end
     env.help(x)
     return true
@@ -695,7 +690,7 @@ local shell_routes = {
         end
         local k=1
         for line in table.unpack( iterator ) do
-          if first == k then definition = {line} break end
+          if first == k then definition = {line:match("^%s*(.*)%s*$")} break end
           k=k+1
         end
       else
