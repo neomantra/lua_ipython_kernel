@@ -343,7 +343,7 @@ do
     end
   end
   
-  local function print_obj(obj, MAX)
+  local function show_obj(obj, MAX)
     local data,metadata = lookup_function_for_object(obj, output_functions, MAX)
     if data then return pcall_wrap(pyout,data,metadata) end
     return false
@@ -384,25 +384,55 @@ do
       pyout({ ["text/plain"] = str.."\n" })
     end
       
-    env_G.print = function(...)
+    env_G.show = function(...)
       if select('#',...) == 1 then
-        if print_obj(..., MAX) then return end
+        if show_obj(..., MAX) then return end
       end
       local args = table.pack(...)
-      for i=1,#args do args[i]=stringfy(args[i]) end
+      local html = { "<div>" }
+      for i=1,#args do
+        if args[i] == "\n" then
+          table.insert(html, '<br style="clear: left;" />')
+        else
+          local component
+          local data = env_G.pyget(args[i])
+          -- TODO: add more mime-types
+          if data["text/html"] then
+            component = data["text/html"]
+          elseif data["image/png"] then
+            component = ('<img src="data:image/png;base64,%s">'):format(data["image/png"])
+          else
+            component = ("<pre>%s</pre>"):format(data["text/plain"])
+          end
+          table.insert(html, ('<div style="float:left;margin:4px;">%s</div>'):format(component))
+        end
+        -- for text/plain output
+        args[i]=stringfy(args[i])
+      end
+      table.insert(html, "</div>")
+      local str = table.concat(args,"\t")
+      pyout({
+          ["text/plain"] = str.."\n",
+          ["text/html"] = table.concat(html)
+      })
+    end
+    
+    env_G.print = function(...)
+      local args = table.pack(...)
+      for i=1,#args do args[i]=tostring(args[i]) end
       local str = table.concat(args,"\t")
       pyout({ ["text/plain"] = str.."\n" })
     end
-
+    
     env_G.io.write = function(...)
       local args = table.pack(...)
-      for i=1,#args do args[i]=stringfy(args[i]) end
+      for i=1,#args do args[i]=tostring(args[i]) end
       local str = table.concat(table.pack(...))
       pyout({ ["text/plain"] = str.."\n" })
     end
     
     env_G.vars = function()
-      print_obj(env, math.huge)
+      show_obj(env, math.huge)
     end
 
     env_G.help = help
@@ -413,16 +443,11 @@ do
         "%quickref    -> This guide.",
         "help(object) -> Help about a given object.",
         "object?      -> Help about a given object.",
-        "print(...)   -> Print a list of objects using \\t as separator.",
-        "                If only one object is given, it would be printed",
-        "                in a fancy way when possible. If more than one",
-        "                object is given, the fancy version will be used",
-        "                only if it fits in one line, otherwise the type",
-        "                of the object will be shown.",
+        "show(...)    -> Show using a list of objects by columns (fancy output).",
         "pyout(data)  -> Allow low-level print to IPython",
         "vars()       -> Shows all global variables declared by the user.",
       }
-      print_obj(table.concat(tbl,"\n"))
+      show_obj(table.concat(tbl,"\n"))
     end
 
     env_G["%guiref"] = function()
@@ -513,7 +538,7 @@ local function execute_code(parent)
       if not out[1] then
         ok,err = nil,out[2]
       elseif #out > 1 then
-        env.print(table.unpack(out, 2))
+        env.show(table.unpack(out, 2))
       end
     else
       ok,err = nil,msg
