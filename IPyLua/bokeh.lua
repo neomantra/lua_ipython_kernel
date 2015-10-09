@@ -659,20 +659,22 @@ local figure_methods = {
 
   hist2d = function(self, params) -- x, y, glyph, color, alpha, size, legend, xgrid, ygrid
     params = params or {}
-    check_table(params, "x", "y", "glyph", "color", "alpha", "size", "legend",
-                "xgrid", "ygrid")
+    check_table(params, "x", "y", "glyph", "color", "alpha", "maxsize", "minsize",
+                "legend", "xgrid", "ygrid")
     check_value(params, "glyph", "Circle")
     check_mandatories(params, "x", "y")
     check_types(params,
-                { "color", "alpha", "size" },
-                { "string", "number", "number" })
+                { "color", "alpha", "minsize", "maxsize" },
+                { "string", "number", "number", "number" })
     local x = toseries(params.x)
     local y = toseries(params.y)
     local color = params.color or next_color(self)
     local alpha = params.alpha or DEF_ALPHA
-    local size  = params.size or 2*DEF_SIZE
+    local maxsize = params.maxsize or 2*DEF_SIZE
+    local minsize = params.minsize or 0.5*DEF_SIZE
     local xgrid = params.xgrid or DEF_XGRID
     local ygrid = params.ygrid or DEF_YGRID
+    assert(minsize <= maxsize, "failure of predicate minsize < maxsize")
     check_equal_sizes(x, y)
     local x_min,x_max = minmax(x)
     local y_min,y_max = minmax(y)
@@ -690,6 +692,7 @@ local figure_methods = {
     end
     local x_off = x_width*0.5
     local y_off = y_width*0.5
+    local size_diff = maxsize - minsize
     local new_x,new_y,new_sizes = {},{},{}
     local l=1
     for i=0,xgrid-1 do
@@ -698,7 +701,7 @@ local figure_methods = {
         if cols[k] > 0 then
           new_x[l] = i*x_width + x_min + x_off
           new_y[l] = j*y_width + y_min + y_off
-          new_sizes[l] = size * cols[k]/max_count
+          new_sizes[l] = minsize + size_diff * cols[k]/max_count
           l = l + 1
         end
       end
