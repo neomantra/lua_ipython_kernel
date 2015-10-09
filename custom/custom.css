@@ -20,11 +20,14 @@ img {
 
 */
 
-/* Uncomment to use a custom font
+/* Uncomment to use a custom font */
 div#notebook, div.CodeMirror, div.output_area pre, div.output_wrapper, div.prompt {
-  font-family: 'Custom Font Name', monospace !important;
+    font-family: 'Monaco', monospace !important;
+    font-size: 12pt;
 }
-*/
+
+/* Change the width of the container */
+.container { width:95% !important; }
 
 /* GLOBALS */
 body {background-color: #2b303b;}

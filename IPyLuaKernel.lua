@@ -57,6 +57,7 @@ local function lookup_function_for_object(obj, stack, ...)
   end
 end
 
+local bokeh = require "IPyLua.bokeh"
 local do_completion = require "IPyLua.rlcompleter".do_completion
 local json = require "IPyLua.dkjson"
 local zmq  = require 'lzmq'
@@ -368,6 +369,8 @@ do
     env_G._ENV = env
     local env_G = setmetatable(env_G, { __index = _G })
     local env = setmetatable(env, { __index = env_G })
+
+    env_G.bokeh = bokeh
     
     env_G.pyout = function(data,metadata)
       metadata = metadata or {}
@@ -430,7 +433,7 @@ do
     env_G.vars = function()
       show_obj(env, math.huge)
     end
-
+    
     env_G.help = help
     
     env_G["%quickref"] = function()

@@ -1,11 +1,33 @@
 local json = require "IPyLua.dkjson"
 local uuid = require "IPyLua.uuid"
+local html_template = require "IPyLua.html_template"
+local null = json.null
 local type = luatype or type
 
 local figure = {}
 local figure_methods = {}
 
--- error checking
+local function default_true(value)
+  if value == nil then return true else return value end
+end
+
+local function reduce(t, func)
+  local out = t[1]
+  for i=2,#t do out = func(out, t[i]) end
+  return out
+end
+
+local function min(t) return reduce(t, math.min) end
+local function max(t) return reduce(t, math.max) end
+
+local function factors(t)
+  local out = {} for i=1,#t do out[i] = tostring(t[i]) end return out
+end
+
+local function apply_gap(p, a, b)
+  local gap = p * (b-a)
+  return a-gap, b+gap
+end
 
 local function extend(param, n)
   local tt = type(param)
@@ -37,10 +59,12 @@ local function invert(t)
   return r
 end
 
+-- error checking
+
 local function check_table(t, ...)
   local inv_list = invert({...})
   for i,v in pairs(t) do
-    assert(inv_list[i], ("unknown field= %s"):format(i))
+    assert(inv_list[i], ("unknown field %s"):format(i))
   end
 end
 
@@ -48,14 +72,14 @@ local function check_value(t, k, ...)
   if t[k] then
     local inv_list = invert({...})
     local v = t[k]
-    assert(inv_list[v], ("unknown value= %s at field= %s"):format(v,k))
+    assert(inv_list[v], ("invalid value %s at field %s"):format(v,k))
   end
 end
 
 local function check_type(t, k, ty)
   local tt = type(t[k])
   assert(t[k] == nil or tt == ty,
-         ("type= %s is not valid for field= %s"):format(tt, k))
+         ("type %s is not valid for field %s"):format(tt, k))
 end
 
 local function check_types(t, keys, types)
@@ -67,7 +91,7 @@ local function check_types(t, keys, types)
 end
 
 local function check_mandatory(t, key)
-  assert(t[key], ("field= %s is mandatory"):format(key))
+  assert(t[key], ("field %s is mandatory"):format(key))
 end
 
 local function check_mandatories(t, ...)
@@ -78,13 +102,13 @@ end
 
 -- private functions
 
-local function add_observer(self, id, tbl)
-  self._observers[id] = self._observers[id] or {}
-  table.insert(self._observers[id], tbl)
+local function add_reference(self, id, tbl)
+  self._references[id] = self._references[id] or {}
+  table.insert(self._references[id], tbl)
 end
 
-local function update_observers(self, id, obj)
-  for _,ref in ipairs(self._observers[id] or {}) do
+local function update_references(self, id, obj)
+  for _,ref in ipairs(self._references[id] or {}) do
     for k,v in pairs(ref) do
       ref[k] = assert( obj[k] )
     end
@@ -100,7 +124,7 @@ local function append_renderer(self, ref)
   table.insert( self._doc.attributes.renderers, ref )
 end
 
-local function add_simple_glyph(self, name, attributes)
+local function add_simple_glyph(self, name, attributes, subtype)
   local id = uuid.new()
   local list = self._list
   attributes.id = id
@@ -109,47 +133,83 @@ local function add_simple_glyph(self, name, attributes)
     type = name,
     id = id,
   }
-  local ref = { type = name, id = id, }
-  add_observer(self, id, ref)
+  self._dict[id] = glyph
+  local ref = { type = name, subtype = subtype, id = id, }
+  add_reference(self, id, ref)
   list[#list+1] = glyph
   return ref,glyph
 end
 
 local function add_tool(self, name, attributes)
-  attributes.plot = {}
-  attributes.plot.type = self._doc.type
-  attributes.plot.subtype = self._doc.subtype
+  attributes.plot = self._docref
   local tools = self._doc.attributes.tools
   tools[#tools+1] = add_simple_glyph(self, name, attributes)
 end
 
 local function add_axis(self, key, params)
   check_mandatories(params, "pos", "type")
-  if not self[key][params.pos] then
-    local axis_ref,axis = add_simple_glyph(self, params.type,
-                                           { tags={}, doc=nil, axis_label=params.label })
-    local formatter_ref,formatter = add_simple_glyph(self, "BasicTickFomatter",
-                                                     { tags={}, doc=nil })
+  local doc_axis = self._doc.attributes[params.pos]
+  if not doc_axis[1] then
+    local formatter_ref,formatter = add_simple_glyph(self, "BasicTickFormatter",
+                                                     { tags={}, doc=null })
+    
     local ticker_ref,ticker =
       add_simple_glyph(self, "BasicTicker",
-                       { tags={}, doc=nil, mantissas={2, 5, 10} })
+                       { tags={}, doc=null, mantissas={2, 5, 10} })
     
-    axis.formatter = formatter_ref
-    axis.ticker = ticker_ref
-    
+    local axis_ref,axis = add_simple_glyph(self, params.type,
+                                           {
+                                             tags={},
+                                             doc=null,
+                                             axis_label=params.label,
+                                             plot = self._docref,
+                                             formatter = formatter_ref,
+                                             ticker = ticker_ref,
+                                           }
+    )
+
+    local dim = (key == "x") and 0 or 1
     append_renderer(self, add_simple_glyph(self, "Grid",
-                                           { tags={}, doc=nil, dimension=1,
-                                             ticker=axis.ticker }))
+                                           { tags={}, doc=null, dimension=dim,
+                                             ticker=ticker_ref,
+                                             plot = self._docref, }))
     append_renderer(self, axis_ref)
     
-    self._doc.attributes[params.pos][1] = axis_ref
-    self[key][params.pos] = axis
+    doc_axis[1] = axis_ref
   else
-    local axis = self[key][params.pos]
+    local axis = self._dict[ doc_axis[1].id ]
     axis.attributes.axis_label = params.label
     axis.type = params.type
-    update_observers(self, axis.id, axis)
+    update_references(self, axis.id, axis)
   end
+end
+
+local function axis_range(self, a, b, key)
+  local range = key .. "_range"
+  local glyph
+  if not self._doc.attributes[range] then
+    local ref
+    ref,glyph = add_simple_glyph(self, "DUMMY",
+                                 { callback = null, doc = null, tags = {} })
+    self._doc.attributes[range] = ref
+  else
+    glyph = self._dict[ self._doc.attributes[range].id ]
+  end
+  if type(a) == "table" then
+    assert(not b, "expected one table of factors or two numbers (min, max)")
+    glyph.type = "FactorRange"
+    glyph.attributes.factors = a
+    glyph.attributes["start"] = nil
+    glyph.attributes["end"] = nil
+  else
+    assert(type(a) == "number" and type(b) == "number",
+           "expected one table of factors or two numbers (min, max)")
+    glyph.type = "Range1d"
+    glyph.attributes.factors = nil
+    glyph.attributes["start"] = a
+    glyph.attributes["end"] = b
+  end
+  update_references(self, glyph.id, glyph)
 end
 
 local function tool_events(self)
@@ -159,7 +219,7 @@ local function tool_events(self)
       {
         geometries = {},
         tags = {},
-        doc = nil,
+        doc = null,
       }
     )
 end
@@ -171,6 +231,7 @@ local figure_methods = {
   -- axis
   
   x_axis = function(self, params)
+    params = params or {}
     check_table(params, "type", "label", "pos", "log", "grid", "num_minor_ticks",
                 "visible", "number_formatter")
     check_value(params, "type", "LinearAxis", "CategoricalAxis")
@@ -179,11 +240,12 @@ local figure_methods = {
                 {"log","grid","num_minor_ticks","visible"},
                 {"boolean","boolean","number","boolean"})
     
-    add_axis(self, "_x_axis", params)
+    add_axis(self, "x", params)
     return self
   end,
 
   y_axis = function(self, params)
+    params = params or {}
     check_table(params, "type", "label", "pos", "log", "grid", "num_minor_ticks",
                 "visible", "number_formatter")
     check_value(params, "type", "LinearAxis", "CategoricalAxis")
@@ -192,67 +254,93 @@ local figure_methods = {
                 {"log","grid","num_minor_ticks","visible"},
                 {"boolean","boolean","number","boolean"})
     
-    add_axis(self, "_y_axis", params)
+    add_axis(self, "y", params)
+    return self
+  end,
+
+  x_range = function(self, a, b)
+    axis_range(self, a, b, "x")
+    return self
+  end,
+
+  y_range = function(self, a, b)
+    axis_range(self, a, b, "y")
     return self
   end,
   
   -- tools
   
   tool_box_select = function(self, select_every_mousemove)
-    select_every_mousemove = select_every_mousemove or true
-    add_tool(self, "BoxSelectTool", { select_every_mousemove=select_every_mousemove, tags={}, doc=nil })
+    select_every_mousemove = default_true( select_every_mousemove )
+    add_tool(self, "BoxSelectTool", { select_every_mousemove=select_every_mousemove, tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
   
   tool_box_zoom = function(self, dimensions)
     dimensions = dimensions or { "width", "height" }
-    add_tool(self, "BoxZoomTool", { dimensions=dimensions, tags={}, doc=nil })
+    add_tool(self, "BoxZoomTool", { dimensions=dimensions, tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
   
   tool_crosshair = function(self)
-    add_tool(self, "CrossHair", { tags={}, doc=nil })
+    add_tool(self, "CrossHair", { tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
+
+  -- tool_hover = function(self, params)
+  --   params = params or {}
+  --   check_table(params, "always_active", "tooltips")
+  --   local always_active = default_true( params.always_active )
+  --   local tooltips = params.tooltips or "($x, $y)"
+  --   add_tool(self, "HoverTool", { tags={}, doc=null, callback=null,
+  --                                 always_active=always_active,
+  --                                 mode="mouse", line_policy="prev",
+  --                                 name=null, names={}, plot=self._docref,
+  --                                 point_policy="snap_to_data",
+  --                                 renderers={},
+  --                                 tooltips=tooltips })
+  --   compile_glyph(self)
+  --   return self
+  -- end,
   
   tool_lasso_select = function(self, select_every_mousemove)
-    select_every_mousemove = select_every_mousemove or true
-    add_tool(self, "LassoSelectTool", { select_every_mousemove=select_every_mousemove, tags={}, doc=nil })
+    select_every_mousemove = default_true( select_every_mousemove )
+    add_tool(self, "LassoSelectTool", { select_every_mousemove=select_every_mousemove, tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
   
   tool_pan = function(self, dimensions)
     dimensions = dimensions or { "width", "height" }
-    add_tool(self, "PanTool", { dimensions=dimensions, tags={}, doc=nil })
+    add_tool(self, "PanTool", { dimensions=dimensions, tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
   
   tool_reset = function(self)
-    add_tool(self, "ResetTool", { tags={}, doc=nil })
+    add_tool(self, "ResetTool", { tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
   
   tool_resize = function(self)
-    add_tool(self, "ResizeTool", { tags={}, doc=nil })
+    add_tool(self, "ResizeTool", { tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
   
   tool_save = function(self)
-    add_tool(self, "PreviewSaveTool", { tags={}, doc=nil })
+    add_tool(self, "PreviewSaveTool", { tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
   
   tool_wheel_zoom = function(self, dimensions)
     dimensions = dimensions or { "width", "height" }
-    add_tool(self, "WheelZoomTool", { dimensions=dimensions, tags={}, doc=nil })
+    add_tool(self, "WheelZoomTool", { dimensions=dimensions, tags={}, doc=null })
     compile_glyph(self)
     return self
   end,
@@ -260,34 +348,35 @@ local figure_methods = {
   -- layer functions
   
   points = function(self, params)
+    params = params or {}
     check_table(params, "x", "y", "glyph", "color", "alpha", "size",
-                "hover", "legend")
+                "legend")
     check_value(params, "glyph", "Circle", "Triangle")
     check_mandatories(params, "x", "y")
     local x = serie_totable(params.x)
     local y = serie_totable(params.y)
     local color = serie_totable( extend(params.color or "#f22c40", #x) )
     local alpha = serie_totable( extend(params.alpha or 0.8, #x) )
-    local hover = serie_totable( params.hover )
+    -- local hover = serie_totable( params.hover )
     local data = {
       x = x,
       y = y,
       color = color,
       fill_alpha = alpha,
-      hover = hover,
+      -- hover = hover,
     }
     local columns = { "x", "y", "fill_alpha", "color" }
-    if hover then table.insert(columns, "hover") end
+    -- if hover then table.insert(columns, "hover") end
     
     local attributes = {
       tags = {},
-      doc = nil,
+      doc = null,
       selected = {
         ["2d"] = { indices = {} },
         ["1d"] = { indices = {} },
         ["0d"] = { indices = {}, flag=false },
       },
-      callback = nil,
+      callback = null,
       data = data,
       column_names = columns,
     }
@@ -296,7 +385,7 @@ local figure_methods = {
     local attributes = {
       fill_color = { field = "color" },
       tags = {},
-      doc = nil,
+      doc = null,
       fill_alpha = { field = "fill_alpha" },
       x = { field = "x" },
       y = { field = "y" },
@@ -304,14 +393,33 @@ local figure_methods = {
     local points_ref = add_simple_glyph(self, params.glyph or "Circle", attributes)
     
     local attributes = {
-      nonselection_glyph = nil,
+      nonselection_glyph = null,
       data_source = source_ref,
       tags = {},
-      doc = nil,
-      selection_glyph = nil,
+      doc = null,
+      selection_glyph = null,
       glyph = points_ref,
     }
     append_renderer(self, add_simple_glyph(self, "GlyphRenderer", attributes) )
+
+    if not self._doc.attributes.x_range then
+      local axis = self._doc.attributes.below[1] or self._doc.attributes.above[1]
+      if axis.type == "LinearAxis" then
+        self:x_range( apply_gap(0.05, min(x), max(x)) )
+      else
+        self:x_range(factors(x))
+      end
+    end
+    
+    if not self._doc.attributes.y_range then
+      local axis = self._doc.attributes.left[1] or self._doc.attributes.right[1]
+      if axis.type == "LinearAxis" then
+        self:y_range( apply_gap(0.05, min(y), max(y)) )
+      else
+        self:y_range(factors(y))
+      end
+    end
+    
     return self
   end,
   
@@ -327,65 +435,21 @@ local figure_methods = {
     end
     return ("[%s]"):format(table.concat(tbl, ","))
   end,
+  
 }
-
-local html_template = [[
-(function(global) {
-  if (typeof (window._bokeh_onload_callbacks) === "undefined"){
-    window._bokeh_onload_callbacks = [];
-  }
-  function load_lib(url, callback){
-    window._bokeh_onload_callbacks.push(callback);
-    if (window._bokeh_is_loading){
-      console.log("Bokeh: BokehJS is being loaded, scheduling callback at", new Date());
-      return null;
-    }
-    console.log("Bokeh: BokehJS not loaded, scheduling load and callback at", new Date());
-    window._bokeh_is_loading = true;
-    var s = document.createElement('script');
-    s.src = url;
-    s.async = true;
-    s.onreadystatechange = s.onload = function(){
-      Bokeh.embed.inject_css("http://cdn.pydata.org/bokeh/release/bokeh-0.10.0.min.css");
-      window._bokeh_onload_callbacks.forEach(function(callback){callback()});
-    };
-    s.onerror = function(){
-      console.warn("failed to load library " + url);
-    };
-    document.getElementsByTagName("head")[0].appendChild(s);
-  }
-
-  bokehjs_url = "http://cdn.pydata.org/bokeh/release/bokeh-0.10.0.min.js"
-
-  var elt = document.getElementById("$ID");
-  if(elt==null) {
-    console.log("Bokeh: ERROR: autoload.js configured with elementid '$ID' but no matching script tag was found. ")
-    return false;
-  }
-
-  // These will be set for the static case
-  var all_models = [$MODEL];
-
-  if(typeof(Bokeh) !== "undefined") {
-    console.log("Bokeh: BokehJS loaded, going straight to plotting");
-    Bokeh.embed.inject_plot("$ID", all_models);
-  } else {
-    load_lib(bokehjs_url, function() {
-      console.log("Bokeh: BokehJS plotting callback run at", new Date())
-      Bokeh.embed.inject_plot("$ID", all_models);
-    });
-  }
-
-}(this));
-]]
 
 local figure_mt = {
   __index = figure_methods,
   
   ipylua_show = function(self)
-    local html = html_template:
-      gsub("$ID", uuid.new()):
-      gsub("$MODEL", self:to_json())
+    local html = html_template:gsub("$([A-Z]+)",
+                                    {
+                                      SCRIPTID = uuid.new(),
+                                      MODELTYPE = self._doc.type,
+                                      MODELID = self._doc.id,
+                                      MODEL = self:to_json(),
+                                    }
+    )
     return {
       ["text/html"] = html,
       ["text/plain"] = "-- impossible to show ASCII art plots",
@@ -404,70 +468,68 @@ setmetatable(
       end
 
       default("tools", { "pan", "wheel_zoom", "box_zoom", "resize", "reset", "save" })
-      default("width",  480)
-      default("height",  520)
+      default("width",  500)
+      default("height", 400)
       default("title",  nil) -- not necessary but useful to make it explicit
       default("xlab",  nil)
       default("ylab",  nil)
       default("xlim",  nil)
       default("ylim",  nil)
       default("padding_factor",  0.07)
-      default("plot_width",  nil)
-      default("plot_height",  nil)
       default("xgrid",  true)
       default("ygrid",  true)
-      default("xaxes",  "below")
-      default("yaxes",  "left")
+      default("xaxes",  {"below"})
+      default("yaxes",  {"left"})
       -- ??? default("theme",  "bokeh_theme") ???
       
-      local self = { _list = {}, _y_axis = {}, _x_axis = {}, _observers={} }
+      local self = { _list = {}, _references={}, _dict = {} }
       setmetatable(self, figure_mt)
-      local plot_id = uuid.new()
-      self._doc = {
-        type = "Plot",
-        subtype = "Chart",
-        id = plot_id,
-        attributes = {
-          plot_width = params.plot_width,
-          plot_height = params.plot_height,
-          title = params.title,
-          --
-          id = plot_id,
-          tags = {},
-          title_text_font_style = "bold",
-          title_text_font_size = { value = "12pt" },
-          tools = {},
-          renderers = {},
-          below = {},
-          above = {},
-          left = {},
-          right = {},
-          responsive = false,
-        },
-      }
-      self._list[1] = self._doc
+      
+      self._docref,self._doc =
+        add_simple_glyph(self, "Plot",
+                         {
+                           plot_width = params.width,
+                           plot_height = params.height,
+                           title = params.title,
+                           --
+                           x_range = nil,
+                           y_range = nil,
+                           extra_x_ranges = {},
+                           extra_y_ranges = {},
+                           id = plot_id,
+                           tags = {},
+                           title_text_font_style = "bold",
+                           title_text_font_size = { value = "12pt" },
+                           tools = {},
+                           renderers = {},
+                           below = {},
+                           above = {},
+                           left = {},
+                           right = {},
+                           responsive = false,
+                         },
+                         "Chart")
       
       tool_events(self)
+      
       for _,name in ipairs(params.tools) do self["tool_" .. name](self) end
-      if params.xaxes then
+      
+      for _,pos in ipairs(params.xaxes) do
         self:x_axis{ label=params.xlab, log=false, grid=params.xgrid,
                      num_minor_ticks=5, visible=true, number_formatter=tostring,
-                     type="LinearAxis", pos=params.xaxes }
+                     type="LinearAxis", pos=pos }
       end
-      if params.yaxes then
+      
+      for _,pos in ipairs(params.yaxes) do
         self:y_axis{ label=params.ylab, log=false, grid=params.ygrid,
                      num_minor_ticks=5, visible=true, number_formatter=tostring,
-                     type="LinearAxis", pos=params.yaxes }
+                     type="LinearAxis", pos=pos }
       end
       
       return self
     end
   }
 )
-
-local x = figure():points{ x={1,2,3,4}, y={10,5,20,30} }
-
-print(x:to_json())
 
 return {
   figure = figure,
