@@ -21,7 +21,7 @@ return [[<script
     s.src = url;
     s.async = true;
     s.onreadystatechange = s.onload = function(){
-      Bokeh.embed.inject_css("http://cdn.pydata.org/bokeh/release/bokeh-0.10.0.min.css");
+      Bokeh.embed.inject_css("https://cdn.pydata.org/bokeh/release/bokeh-0.10.0.min.css");
       window._bokeh_onload_callbacks.forEach(function(callback){callback()});
     };
     s.onerror = function(){
@@ -30,7 +30,7 @@ return [[<script
     document.getElementsByTagName("head")[0].appendChild(s);
   }
 
-  bokehjs_url = "http://cdn.pydata.org/bokeh/release/bokeh-0.10.0.js"
+  bokehjs_url = "https://cdn.pydata.org/bokeh/release/bokeh-0.10.0.min.js"
 
   var elt = document.getElementById("$SCRIPTID");
   if(elt==null) {
