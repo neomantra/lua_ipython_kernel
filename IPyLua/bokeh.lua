@@ -26,6 +26,8 @@ local COLORS = {
 local figure = {}
 local figure_methods = {}
 
+local hist2d_transformation
+
 local function round(val)
   if val > 0 then
     return math.floor(val + 0.5)
@@ -472,22 +474,29 @@ local figure_methods = {
     compile_glyph(self)
     return self
   end,
-
-  -- tool_hover = function(self, params)
-  --   params = params or {}
-  --   check_table(params, "always_active", "tooltips")
-  --   local always_active = default_true( params.always_active )
-  --   local tooltips = params.tooltips or "($x, $y)"
-  --   add_tool(self, "HoverTool", { tags={}, doc=null, callback=null,
-  --                                 always_active=always_active,
-  --                                 mode="mouse", line_policy="prev",
-  --                                 name=null, names={}, plot=self._docref,
-  --                                 point_policy="snap_to_data",
-  --                                 renderers={},
-  --                                 tooltips=tooltips })
-  --   compile_glyph(self)
-  --   return self
-  -- end,
+  
+  tool_hover = function(self, params) -- always_active, tooltips
+    params = params or {}
+    check_table(params, "always_active", "tooltips")
+    local always_active = default_true( params.always_active )
+    local tooltips = params.tooltips or
+      {
+        {"Tag", "@hover"},
+        {"(x,y)", "($x, $y)"}
+      }
+    add_tool(self, "HoverTool", { tags={},
+                                  doc=null,
+                                  callback=null,
+                                  always_active=always_active,
+                                  name=null,
+                                  names={},
+                                  plot=self._docref,
+                                  point_policy="follow_mouse",
+                                  renderers={},
+                                  tooltips=tooltips })
+    compile_glyph(self)
+    return self
+  end,
   
   tool_lasso_select = function(self, select_every_mousemove)
     select_every_mousemove = default_true( select_every_mousemove )
@@ -552,7 +561,6 @@ local figure_methods = {
     local alpha = params.alpha or DEF_ALPHA
     local width  = params.width or DEF_WIDTH
     check_equal_sizes(x, y)
-    -- local hover = toseries( params.hover )
     local data = { x=x, y=y, }
     local columns = { "x", "y" }
 
@@ -576,9 +584,10 @@ local figure_methods = {
     return self
   end,
 
-  bars = function(self, params) -- x, y, width, height, color, alpha, legend
+  bars = function(self, params) -- x, y, width, height, color, alpha, legend, hover
     params = params or {}
-    check_table(params, "x", "height", "width", "y", "color", "alpha", "legend")
+    check_table(params, "x", "height", "width", "y", "color", "alpha",
+                "legend", "hover")
     check_mandatories(params, "x")
     local x = toseries( extend(params.x or DEF_X, 1) )
     local y = toseries( extend(params.y or DEF_Y, #x) )
@@ -586,10 +595,19 @@ local figure_methods = {
     local height = toseries( extend(params.height or DEF_HEIGTH, #x) )
     local color = toseries( extend(params.color or next_color(self), #x) )
     local alpha = toseries( extend(params.alpha or DEF_ALPHA, #x) )
+    local hover = params.hover and toseries( params.hover )
     check_equal_sizes(x, y, width, height, color, alpha)
-    -- local hover = toseries( params.hover )
-    local data = { x=x, y=y, width=width, height=height, fill_alpha=alpha, color=color }
+    local data = {
+      x=x,
+      y=y,
+      width=width,
+      height=height,
+      fill_alpha=alpha,
+      color=color,
+      hover=hover,
+    }
     local columns = { "x", "y", "width", "height", "fill_alpha", "color" }
+    if hover then table.insert(columns, "hover") end
     
     local source_ref = add_column_data_source(self, data, columns)
     
@@ -612,10 +630,10 @@ local figure_methods = {
     return self
   end,
 
-  points = function(self, params) -- x, y, glyph, color, alpha, size, legend
+  points = function(self, params) -- x, y, glyph, color, alpha, size, legend, hover
     params = params or {}
     check_table(params, "x", "y", "glyph", "color", "alpha", "size",
-                "legend")
+                "legend", "hover")
     check_value(params, "glyph", "Circle", "Triangle")
     check_mandatories(params, "x", "y")
     local x = toseries(params.x)
@@ -624,17 +642,17 @@ local figure_methods = {
     local alpha = toseries( extend(params.alpha or DEF_ALPHA, #x) )
     local size  = toseries( extend(params.size or DEF_SIZE, #x) )
     check_equal_sizes(x, y, color, alpha, size)
-    -- local hover = toseries( params.hover )
+    local hover = params.hover and toseries( params.hover )
     local data = {
       x = x,
       y = y,
       color = color,
       fill_alpha = alpha,
       size = size,
-      -- hover = hover,
+      hover = hover,
     }
     local columns = { "x", "y", "fill_alpha", "color", "size" }
-    -- if hover then table.insert(columns, "hover") end
+    if hover then table.insert(columns, "hover") end
 
     local source_ref = add_column_data_source(self, data, columns)
     
@@ -659,57 +677,22 @@ local figure_methods = {
 
   hist2d = function(self, params) -- x, y, glyph, color, alpha, size, legend, xgrid, ygrid
     params = params or {}
-    check_table(params, "x", "y", "glyph", "color", "alpha", "maxsize", "minsize",
-                "legend", "xgrid", "ygrid")
-    check_value(params, "glyph", "Circle")
-    check_mandatories(params, "x", "y")
-    check_types(params,
-                { "color", "alpha", "minsize", "maxsize" },
-                { "string", "number", "number", "number" })
-    local x = toseries(params.x)
-    local y = toseries(params.y)
-    local color = params.color or next_color(self)
-    local alpha = params.alpha or DEF_ALPHA
-    local maxsize = params.maxsize or 2*DEF_SIZE
-    local minsize = params.minsize or 0.5*DEF_SIZE
-    local xgrid = params.xgrid or DEF_XGRID
-    local ygrid = params.ygrid or DEF_YGRID
-    assert(minsize <= maxsize, "failure of predicate minsize < maxsize")
-    check_equal_sizes(x, y)
-    local x_min,x_max = minmax(x)
-    local y_min,y_max = minmax(y)
-    local x_width = (x_max - x_min) / (xgrid-1)
-    local y_width = (y_max - y_min) / (ygrid-1)
-    local cols = {}
-    for i=1,xgrid*ygrid do cols[i] = 0 end
-    local max_count = 0
-    for i=1,#x do
-      local ix = math.floor((x[i]-x_min)/x_width)
-      local iy = math.floor((y[i]-y_min)/y_width)
-      local k = iy*xgrid + ix + 1
-      cols[k] = cols[k] + 1
-      if cols[k] > max_count then max_count= cols[k] end
-    end
-    local x_off = x_width*0.5
-    local y_off = y_width*0.5
-    local size_diff = maxsize - minsize
-    local new_x,new_y,new_sizes = {},{},{}
-    local l=1
-    for i=0,xgrid-1 do
-      for j=0,ygrid-2 do
-        local k = j*xgrid + i + 1
-        if cols[k] > 0 then
-          new_x[l] = i*x_width + x_min + x_off
-          new_y[l] = j*y_width + y_min + y_off
-          new_sizes[l] = minsize + size_diff * cols[k]/max_count
-          l = l + 1
-        end
-      end
-    end
-    x,y,size = new_x,new_y,new_sizes
-    
-    return self:points{ x=x, y=y, size=size, alpha=alpha, color=color,
-                        glyph=params.glyph, legend=params.legend }
+    local hist2d = hist2d_transformation(
+      { x = params.x,
+        y = params.y,
+        minsize = params.minsize,
+        maxsize = params.maxsize,
+        xgrid = params.xgrid,
+        ygrid = params.ygrid
+      },
+      {
+        glyph = params.glyph,
+        color = params.color,
+        alpha = params.alpha,
+        legend = params.legend,
+      }
+    )
+    return self:points( hist2d )
   end,
   
   -- conversion
@@ -758,7 +741,8 @@ setmetatable(
         params[name] = params[name] or value
       end
 
-      default("tools", { "pan", "wheel_zoom", "box_zoom", "resize", "reset", "save" })
+      default("tools", { "pan", "wheel_zoom", "box_zoom", "resize",
+                         "reset", "save", "hover" })
       default("width",  500)
       default("height", 400)
       default("title",  nil) -- not necessary but useful to make it explicit
@@ -824,6 +808,65 @@ setmetatable(
   }
 )
 
+-- data transformers
+
+-- local hist2d_transformation is declared at the top of this file
+function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, xgrid, ygrid
+  params = params or {}
+  check_table(params, "x", "y", "maxsize", "minsize", "xgrid", "ygrid")
+  check_mandatories(params, "x", "y")
+  check_types(params,
+              { "minsize", "maxsize" },
+              { "number", "number" })
+  local x = toseries(params.x)
+  local y = toseries(params.y)
+  local maxsize = params.maxsize or 2*DEF_SIZE
+  local minsize = params.minsize or 0.5*DEF_SIZE
+  local xgrid = params.xgrid or DEF_XGRID
+  local ygrid = params.ygrid or DEF_YGRID
+  assert(minsize <= maxsize, "failure of predicate minsize < maxsize")
+  check_equal_sizes(x, y)
+  local x_min,x_max = minmax(x)
+  local y_min,y_max = minmax(y)
+  local x_width = (x_max - x_min) / (xgrid-1)
+  local y_width = (y_max - y_min) / (ygrid-1)
+  local grid = {}
+  for i=1,xgrid*ygrid do grid[i] = 0 end
+  local max_count = 0
+  for i=1,#x do
+    local ix = math.floor((x[i]-x_min)/x_width)
+    local iy = math.floor((y[i]-y_min)/y_width)
+    local k = iy*xgrid + ix + 1
+    grid[k] = grid[k] + 1
+    if grid[k] > max_count then max_count= grid[k] end
+  end
+  local x_off = x_width*0.5
+  local y_off = y_width*0.5
+  local size_diff = maxsize - minsize
+  local new_x,new_y,new_sizes = {},{},{}
+  local l=1
+  for i=0,xgrid-1 do
+    for j=0,ygrid-2 do
+      local k = j*xgrid + i + 1
+      if grid[k] > 0 then
+        new_x[l] = i*x_width + x_min + x_off
+        new_y[l] = j*y_width + y_min + y_off
+        new_sizes[l] = minsize + size_diff * grid[k]/max_count
+        l = l + 1
+      end
+    end
+  end
+
+  local result = {
+    x = new_x,
+    y = new_y,
+    size = new_sizes,
+  }
+  for k,v in ipairs(more_params or {}) do result[k]=v end
+  
+  return result
+end
+
 -- color transformers
 
 -- http://www.andrewnoske.com/wiki/Code_-_heatmaps_and_color_gradients
@@ -879,5 +922,8 @@ return {
   },
   sizes = {
     linear = linear_size_transformer,
+  },
+  transformations = {
+    hist2d = hist2d_transformation,
   },
 }
