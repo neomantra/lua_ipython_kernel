@@ -48,23 +48,42 @@ end
 local math_min = math.min
 local math_max = math.max
 
-local function min(t) return reduce(t, math_min) end
-local function max(t) return reduce(t, math_max) end
-
-local function minmax(t)
-  assert(t ~= nil)
-  local min,max
+local function min(t)
   local tt = type(t)
   if tt == "table" or tt == "userdata" then
-    min,max = t[1],t[1]
+    return reduce(t, math_min)
+  else
+    return t
+  end
+end
+
+local function max(t)
+  local tt = type(t)
+  if tt == "table" or tt == "userdata" then
+    return reduce(t, math_max)
+  else
+    return t
+  end
+end
+
+local function minmax(t, size)
+  local size = size or {}
+  local tmin,tmax
+  local tt = type(t)
+  if tt == "table" or tt == "userdata" then
+    tmin = t[1] - (size[1] or 0)*0.5
+    tmax = t[1] + (size[1] or 0)*0.5
     for i=2,#t do
-      min=math_min(min,t[i])
-      max=math_max(max,t[i])
+      local s = (size[i] or 0)*0.5
+      tmin=math_min(tmin,t[i] - s)
+      tmax=math_max(tmax,t[i] + s)
     end
   else
-    min,max = t,t
+    local s = (max(size) or 0.0)*0.5
+    tmin = t - s
+    tmax = t + s
   end
-  return min,max
+  return tmin,tmax
 end
 
 local function factors(t, out, dict)
@@ -83,16 +102,6 @@ local function apply_gap(p, a, b)
   return a-gap, b+gap
 end
 
-local function extend(param, n)
-  local tt = type(param)
-  if tt == "string" or tt == "number" then
-    local value = param
-    param = {}
-    for i=1,n do param[i] = value end
-  end
-  return param
-end
-
 local function toseries(s)
   collectgarbage("collect")
   if s==nil then return nil end
@@ -104,10 +113,11 @@ local function toseries(s)
     elseif tt == "table" then
       return s
     else
-      return s
+      error(("series data type %s cannot be handled: " ):format(tt))
     end
+  else
+    return s
   end
-  error(("series data type %s cannot be handled: " ):format(tt))
 end
 
 local function invert(t)
@@ -169,22 +179,22 @@ end
 
 local function create_data_columns(data, more_data)
   local N
-  local s_data,columns,s_more_data = {},{},{}
-
-  local function process(tbl, k, v)
+  local s_data,columns = {},{}
+  
+  local function process(k, v)
     local v  = toseries(v)
     local tt = type(v)
     if tt == "table" or tt == "userdata" then
       local M = #v
       assert(not N or N==M, "Found different series sizes")
       N = M
-      tbl[k] = v
+      s_data[k] = v
       table.insert(columns, k)
     end
   end
   
-  for k,v in ipairs(data)      do process( s_data,      k, v ) end
-  for k,v in ipairs(more_data) do process( s_more_data, k, v ) end
+  for k,v in pairs(data)      do process( k, v ) end
+  for k,v in pairs(more_data) do process( k, v ) end
   
   return s_data,columns,s_more_data
 end
@@ -213,14 +223,20 @@ local function next_color(self)
 end
 
 local function check_axis_range(self)
+  local glyphs = self._glyphs
+  
   if not self._doc.attributes.x_range then
     local axis = self._doc.attributes.below[1] or self._doc.attributes.above[1]
     if axis.type == "LinearAxis" then
       local x_min,x_max = math.huge,-math.huge
       for _,source in ipairs(self._sources) do
-        local s_min,s_max = minmax(source.attributes.data.x)
-        x_min = math.min(x_min,s_min)
-        x_max = math.max(x_max,s_max)
+        local s_min,s_max = minmax(source.attributes.data.x or
+                                     (glyphs[source.id].attributes.x or {}).value,
+                                   source.attributes.data.width)
+        local offset = (glyphs[source.id].attributes.width or {}).value or 0.0
+
+        x_min = math.min(x_min,s_min) - offset*0.5
+        x_max = math.max(x_max,s_max) + offset*0.5
       end
       self:x_range( apply_gap(0.05, x_min, x_max) )
     else
@@ -237,9 +253,13 @@ local function check_axis_range(self)
     if axis.type == "LinearAxis" then
       local y_min,y_max = math.huge,-math.huge
       for _,source in ipairs(self._sources) do
-        local s_min,s_max = minmax(source.attributes.data.y)
-        y_min = math.min(y_min, s_min)
-        y_max = math.max(y_max, s_max)
+        local s_min,s_max = minmax(source.attributes.data.y or
+                                     (glyphs[source.id].attributes.y or {}).value,
+                                   source.attributes.data.height)    
+        local offset = (glyphs[source.id].attributes.height or {}).value or 0.0
+        
+        y_min = math.min(y_min, s_min) - offset*0.5
+        y_max = math.max(y_max, s_max) + offset*0.5
       end
       self:y_range( apply_gap(0.05, y_min, y_max) )
     else
@@ -279,7 +299,7 @@ local function append_renderer(self, ref)
   return ref
 end
 
-local function add_simple_glyph(self, name, attributes, subtype)
+local function add_simple_glyph(self, name, attributes, subtype, source_ref)
   local id = uuid.new()
   local list = self._list
   attributes.id = id
@@ -292,6 +312,7 @@ local function add_simple_glyph(self, name, attributes, subtype)
   local ref = { type = name, subtype = subtype, id = id, }
   add_reference(self, id, ref)
   list[#list+1] = glyph
+  if source_ref then self._glyphs[source_ref.id] = glyph end
   return ref,glyph
 end
 
@@ -622,7 +643,7 @@ local figure_methods = {
                                        alpha="line_alpha",
                                        width="line_width", })
     
-    local lines_ref = add_simple_glyph(self, "Line", attributes)
+    local lines_ref = add_simple_glyph(self, "Line", attributes, nil, source_ref)
 
     local renderer_ref = append_source_renderer(self, source_ref, lines_ref)
 
@@ -663,7 +684,7 @@ local figure_methods = {
       create_simple_glyph_attributes(data, more_data,
                                      { color="fill_color" })
     
-    local lines_ref = add_simple_glyph(self, "Rect", attributes)
+    local lines_ref = add_simple_glyph(self, "Rect", attributes, nil, source_ref)
 
     local renderer_ref = append_source_renderer(self, source_ref, lines_ref)
 
@@ -695,7 +716,7 @@ local figure_methods = {
     }
     local more_data = params.more_data or {}
     
-    local s_data,s_columns,s_more_data = create_data_columns(data, more_data)
+    local s_data,s_columns = create_data_columns(data, more_data)
     
     local source_ref = add_column_data_source(self, s_data, s_columns)
     
@@ -704,7 +725,7 @@ local figure_methods = {
                                      { color="fill_color", })
     
     local points_ref = add_simple_glyph(self, params.glyph or "Circle",
-                                        attributes)
+                                        attributes, nil, source_ref)
 
     local renderer_ref = append_source_renderer(self, source_ref, points_ref)
 
@@ -798,7 +819,7 @@ setmetatable(
       
       local self = { _list = {}, _references={}, _dict = {},
                      _color_number = #COLORS - 1, _colors = COLORS,
-                     _sources = {} }
+                     _sources = {}, _glyphs = {} }
       setmetatable(self, figure_mt)
       
       self._docref,self._doc =
