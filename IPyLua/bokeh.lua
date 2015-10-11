@@ -52,10 +52,17 @@ local function min(t) return reduce(t, math_min) end
 local function max(t) return reduce(t, math_max) end
 
 local function minmax(t)
-  local min,max = t[1],t[1]
-  for i=2,#t do
-    min=math_min(min,t[i])
-    max=math_max(max,t[i])
+  assert(t ~= nil)
+  local min,max
+  local tt = type(t)
+  if tt == "table" or tt == "userdata" then
+    min,max = t[1],t[1]
+    for i=2,#t do
+      min=math_min(min,t[i])
+      max=math_max(max,t[i])
+    end
+  else
+    min,max = t,t
   end
   return min,max
 end
