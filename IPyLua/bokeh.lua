@@ -96,6 +96,8 @@ local function toseries(s)
       return mt.ipylua_toseries(s)
     elseif tt == "table" then
       return s
+    else
+      return s
     end
   end
   error(("series data type %s cannot be handled: " ):format(tt))
@@ -157,6 +159,45 @@ local function check_mandatories(t, ...)
 end
 
 -- private functions
+
+local function create_data_columns(data, more_data)
+  local N
+  local s_data,columns,s_more_data = {},{},{}
+
+  local function process(tbl, k, v)
+    local v  = toseries(v)
+    local tt = type(v)
+    if tt == "table" or tt == "userdata" then
+      local M = #v
+      assert(not N or N==M, "Found different series sizes")
+      N = M
+      tbl[k] = v
+      table.insert(columns, k)
+    end
+  end
+  
+  for k,v in ipairs(data)      do process( s_data,      k, v ) end
+  for k,v in ipairs(more_data) do process( s_more_data, k, v ) end
+  
+  return s_data,columns,s_more_data
+end
+
+local function create_simple_glyph_attributes(data, more_data, translate)
+  local attributes = { tags={}, doc=null }
+  for _,tbl in ipairs{ data, more_data } do
+    for k,v in pairs(tbl) do
+      local units
+      local tt = type(v)
+      if k == "height" or k == "width" then units = "data" end
+      if tt == "table" or tt == "userdata" then
+        attributes[ translate[k] or k ] = { units = units, field = k }
+      else
+        attributes[ translate[k] or k ] = { units = units, value = v }
+      end
+    end
+  end
+  return attributes
+end
 
 local function next_color(self)
   self._color_number = (self._color_number + 1) % #self._colors
@@ -555,28 +596,25 @@ local figure_methods = {
     params = params or {}
     check_table(params, "x", "y", "color", "alpha", "width", "legend", "more_data")
     check_mandatories(params, "x", "y")
-    local x = toseries(params.x)
-    local y = toseries(params.y)
+    local x = params.x
+    local y = params.y
     local color = params.color or next_color(self)
     local alpha = params.alpha or DEF_ALPHA
     local width  = params.width or DEF_WIDTH
-    check_equal_sizes(x, y)
-    local data = { x=x, y=y, }
-    local columns = { "x", "y" }
-
-    for k,v in pairs(more_data) do data[k] = v table.insert(columns, k) end
     
-    local source_ref = add_column_data_source(self, data, columns)
+    local data = { x=x, y=y }
+    local more_data = params.more_data or {}
     
-    local attributes = {
-      tags = {},
-      doc = null,
-      line_color = { value = color },
-      line_alpha = { value = alpha },
-      line_width = { value = width },
-      x = { field = "x" },
-      y = { field = "y" },
-    }
+    local s_data,s_columns,s_more_data = create_data_columns(data, more_data)
+    
+    local source_ref = add_column_data_source(self, s_data, s_columns)
+    
+    local attributes =
+      create_simple_glyph_attributes(data, more_data,
+                                     { color="line_color",
+                                       alpha="line_alpha",
+                                       width="line_width", })
+    
     local lines_ref = add_simple_glyph(self, "Line", attributes)
 
     local renderer_ref = append_source_renderer(self, source_ref, lines_ref)
@@ -591,14 +629,14 @@ local figure_methods = {
     check_table(params, "x", "height", "width", "y", "color", "alpha",
                 "legend", "hover", "more_data")
     check_mandatories(params, "x")
-    local x = toseries( extend(params.x or DEF_X, 1) )
-    local y = toseries( extend(params.y or DEF_Y, #x) )
-    local width = toseries( extend(params.width or DEF_WIDTH, #x) )
-    local height = toseries( extend(params.height or DEF_HEIGTH, #x) )
-    local color = toseries( extend(params.color or next_color(self), #x) )
-    local alpha = toseries( extend(params.alpha or DEF_ALPHA, #x) )
-    local hover = params.hover and toseries( params.hover )
-    check_equal_sizes(x, y, width, height, color, alpha)
+    local x = params.x or DEF_X
+    local y = params.y or DEF_Y
+    local width = params.width or DEF_WIDTH
+    local height = params.height or DEF_HEIGTH
+    local color = params.color or next_color(self)
+    local alpha = params.alpha or DEF_ALPHA
+    local hover = params.hover
+    
     local data = {
       x=x,
       y=y,
@@ -608,23 +646,16 @@ local figure_methods = {
       color=color,
       hover=hover,
     }
-    local columns = { "x", "y", "width", "height", "fill_alpha", "color" }
-    if hover then table.insert(columns, "hover") end
-
-    for k,v in pairs(more_data) do data[k] = v table.insert(columns, k) end
+    local more_data = params.more_data or {}
     
-    local source_ref = add_column_data_source(self, data, columns)
+    local s_data,s_columns,s_more_data = create_data_columns(data, more_data)
     
-    local attributes = {
-      tags = {},
-      doc = null,
-      fill_color = { field = "color" },
-      fill_alpha = { field = "fill_alpha" },
-      height = { units = "data", field = "height" },
-      width = { units = "data", field = "width" },
-      x = { field = "x" },
-      y = { field = "y" },
-    }
+    local source_ref = add_column_data_source(self, s_data, s_columns)
+    
+    local attributes =
+      create_simple_glyph_attributes(data, more_data,
+                                     { color="fill_color" })
+    
     local lines_ref = add_simple_glyph(self, "Rect", attributes)
 
     local renderer_ref = append_source_renderer(self, source_ref, lines_ref)
@@ -640,38 +671,31 @@ local figure_methods = {
                 "legend", "hover", "more_data")
     check_value(params, "glyph", "Circle", "Triangle")
     check_mandatories(params, "x", "y")
-    local x = toseries(params.x)
-    local y = toseries(params.y)
-    local color = toseries( extend(params.color or next_color(self), #x) )
-    local alpha = toseries( extend(params.alpha or DEF_ALPHA, #x) )
-    local size  = toseries( extend(params.size or DEF_SIZE, #x) )
-    check_equal_sizes(x, y, color, alpha, size)
-    local hover = params.hover and toseries( params.hover )
-    local more_data = params.more_data or {}
+    local x = params.x
+    local y = params.y
+    local color = params.color or next_color(self)
+    local alpha = params.alpha or DEF_ALPHA
+    local size  = params.size or DEF_SIZE
+    local hover = params.hover
+    
     local data = {
-      x = x,
-      y = y,
+      x=x,
+      y=y,
       color = color,
       fill_alpha = alpha,
       size = size,
       hover = hover,
     }
-    local columns = { "x", "y", "fill_alpha", "color", "size" }
-    if hover then table.insert(columns, "hover") end
-
-    for k,v in pairs(more_data) do data[k] = v table.insert(columns, k) end
-
-    local source_ref = add_column_data_source(self, data, columns)
+    local more_data = params.more_data or {}
     
-    local attributes = {
-      tags = {},
-      doc = null,
-      fill_color = { field = "color" },
-      fill_alpha = { field = "fill_alpha" },
-      size = { field = "size" },
-      x = { field = "x" },
-      y = { field = "y" },
-    }
+    local s_data,s_columns,s_more_data = create_data_columns(data, more_data)
+    
+    local source_ref = add_column_data_source(self, s_data, s_columns)
+    
+    local attributes =
+      create_simple_glyph_attributes(data, more_data,
+                                     { color="fill_color", })
+    
     local points_ref = add_simple_glyph(self, params.glyph or "Circle",
                                         attributes)
 
