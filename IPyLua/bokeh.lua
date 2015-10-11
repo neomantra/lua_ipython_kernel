@@ -418,7 +418,7 @@ local figure_methods = {
     return self
   end,
 
-  drop_points = function(self, xmin, xmax, ymin, ymax)
+  crop_points = function(self, xmin, xmax, ymin, ymax)
     for _,source in ipairs(self._sources) do
       local data = source.attributes.data
       local new_data = {
@@ -551,9 +551,9 @@ local figure_methods = {
   
   -- layer functions
 
-  lines = function(self, params) -- x, y, color, alpha, width, legend
+  lines = function(self, params) -- x, y, color, alpha, width, legend, more_data
     params = params or {}
-    check_table(params, "x", "y", "color", "alpha", "width", "legend")
+    check_table(params, "x", "y", "color", "alpha", "width", "legend", "more_data")
     check_mandatories(params, "x", "y")
     local x = toseries(params.x)
     local y = toseries(params.y)
@@ -564,6 +564,8 @@ local figure_methods = {
     local data = { x=x, y=y, }
     local columns = { "x", "y" }
 
+    for k,v in pairs(more_data) do data[k] = v table.insert(columns, k) end
+    
     local source_ref = add_column_data_source(self, data, columns)
     
     local attributes = {
@@ -584,10 +586,10 @@ local figure_methods = {
     return self
   end,
 
-  bars = function(self, params) -- x, y, width, height, color, alpha, legend, hover
+  bars = function(self, params) -- x, y, width, height, color, alpha, legend, hover, more_data
     params = params or {}
     check_table(params, "x", "height", "width", "y", "color", "alpha",
-                "legend", "hover")
+                "legend", "hover", "more_data")
     check_mandatories(params, "x")
     local x = toseries( extend(params.x or DEF_X, 1) )
     local y = toseries( extend(params.y or DEF_Y, #x) )
@@ -608,6 +610,8 @@ local figure_methods = {
     }
     local columns = { "x", "y", "width", "height", "fill_alpha", "color" }
     if hover then table.insert(columns, "hover") end
+
+    for k,v in pairs(more_data) do data[k] = v table.insert(columns, k) end
     
     local source_ref = add_column_data_source(self, data, columns)
     
@@ -630,10 +634,10 @@ local figure_methods = {
     return self
   end,
 
-  points = function(self, params) -- x, y, glyph, color, alpha, size, legend, hover
+  points = function(self, params) -- x, y, glyph, color, alpha, size, legend, hover, more_data
     params = params or {}
     check_table(params, "x", "y", "glyph", "color", "alpha", "size",
-                "legend", "hover")
+                "legend", "hover", "more_data")
     check_value(params, "glyph", "Circle", "Triangle")
     check_mandatories(params, "x", "y")
     local x = toseries(params.x)
@@ -643,6 +647,7 @@ local figure_methods = {
     local size  = toseries( extend(params.size or DEF_SIZE, #x) )
     check_equal_sizes(x, y, color, alpha, size)
     local hover = params.hover and toseries( params.hover )
+    local more_data = params.more_data or {}
     local data = {
       x = x,
       y = y,
@@ -653,6 +658,8 @@ local figure_methods = {
     }
     local columns = { "x", "y", "fill_alpha", "color", "size" }
     if hover then table.insert(columns, "hover") end
+
+    for k,v in pairs(more_data) do data[k] = v table.insert(columns, k) end
 
     local source_ref = add_column_data_source(self, data, columns)
     
@@ -734,7 +741,7 @@ local figure_mt = {
 setmetatable(
   figure,
   {
-    __call = function(_,params)
+    __call = function(_,params) -- tools, height, title, xlab, ylab, xlim, ylim, padding_factor, xgrid, ygrid, xaxes, yaxes, tooltips
       params = params or {}
       
       local function default(name, value)
@@ -755,6 +762,7 @@ setmetatable(
       default("ygrid",  true)
       default("xaxes",  {"below"})
       default("yaxes",  {"left"})
+      default("tooltips", nil)
       -- ??? default("theme",  "bokeh_theme") ???
       
       local self = { _list = {}, _references={}, _dict = {},
@@ -789,7 +797,13 @@ setmetatable(
       
       tool_events(self)
       
-      for _,name in ipairs(params.tools) do self["tool_" .. name](self) end
+      for _,name in ipairs(params.tools) do
+        if name == "hover" then
+          self["tool_" .. name](self, { tooltips = params.tooltips })
+        else
+          self["tool_" .. name](self)
+        end
+      end
       
       for _,pos in ipairs(params.xaxes) do
         self:x_axis{ label=params.xlab, log=false, grid=params.xgrid,
@@ -843,15 +857,18 @@ function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, x
   local x_off = x_width*0.5
   local y_off = y_width*0.5
   local size_diff = maxsize - minsize
-  local new_x,new_y,new_sizes = {},{},{}
+  local new_x,new_y,new_sizes,counts,ratios = {},{},{},{},{}
   local l=1
   for i=0,xgrid-1 do
     for j=0,ygrid-2 do
       local k = j*xgrid + i + 1
       if grid[k] > 0 then
+        local ratio = grid[k]/max_count
         new_x[l] = i*x_width + x_min + x_off
         new_y[l] = j*y_width + y_min + y_off
-        new_sizes[l] = minsize + size_diff * grid[k]/max_count
+        new_sizes[l] = minsize + size_diff * ratio
+        counts[l] = grid[k]
+        ratios[l] = ratio
         l = l + 1
       end
     end
@@ -861,8 +878,15 @@ function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, x
     x = new_x,
     y = new_y,
     size = new_sizes,
+    more_data = {
+      count = counts,
+      ratio = ratios,
+    },
   }
-  for k,v in ipairs(more_params or {}) do result[k]=v end
+  for k,v in ipairs(more_params or {}) do
+    assert(k ~= "more_data", "Unable to handle more_data argument")
+    result[k]=v
+  end
   
   return result
 end

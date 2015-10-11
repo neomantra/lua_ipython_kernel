@@ -43,7 +43,7 @@ if json then return json end
 
 -- global dependencies:
 local pairs, type, tostring, tonumber, getmetatable, setmetatable, rawset =
-  pairs, type, tostring, tonumber, getmetatable, setmetatable, rawset
+  pairs, luatype or type, tostring, tonumber, getmetatable, setmetatable, rawset
 local error, require, pcall, select = error, require, pcall, select
 local floor, huge = math.floor, math.huge
 local strrep, gsub, strsub, strbyte, strchar, strfind, strlen, strformat =
@@ -67,7 +67,16 @@ json.null = setmetatable ({}, {
     __tojson = function () return "null" end
 })
 
+local function is_array_userdata(v)
+  if type(v) == "userdata" then
+    local mt = getmetatable(v)
+    if mt.__len and type( mt.__index ) == "function" then return true end
+  end
+  return false
+end
+
 local function isarray (tbl)
+  if type(tbl) == "userdata" then return true,#tbl end
   local max, n, arraylen = 0, 0, 0
   for k,v in pairs (tbl) do
     if k == 'n' and type(v) == 'number' then
@@ -280,7 +289,7 @@ encode2 = function (value, indent, level, buffer, buflen, tables, globalorder, s
   elseif valtype == 'string' then
     buflen = buflen + 1
     buffer[buflen] = quotestring (value)
-  elseif valtype == 'table' then
+  elseif valtype == 'table' or is_array_userdata(value) then
     if tables[value] then
       return exception('reference cycle', value, state, buffer, buflen)
     end
