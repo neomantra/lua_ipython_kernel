@@ -9,6 +9,7 @@ local DEF_XGRID = 100
 local DEF_YGRID = 100
 local DEF_SIZE = 6
 local DEF_WIDTH = 6
+local DEF_LINE_WIDTH = 2
 local DEF_HEIGTH = 6
 local DEF_ALPHA = 0.8
 local DEF_X = 0
@@ -174,7 +175,7 @@ end
 local function compute_optim(x, DEF)
   local optim
   local x = toseries(x)
-  if type(x) == "number" then
+  if not x or type(x) == "number" then
     optim = DEF
   elseif type(x) == "string" then
     optim = 1.0
@@ -859,9 +860,9 @@ local figure_methods = {
     local y = params.y
     local color = params.color or next_color(self)
     local alpha = params.alpha or DEF_ALPHA
-    local width  = params.width or DEF_WIDTH
+    local width  = params.width or DEF_LINE_WIDTH
     
-    local data = { x=x, y=y }
+    local data = { x=x, y=y, width=width, alpha=alpha, color=color }
     local more_data = params.more_data or {}
     
     local s_data,s_columns,s_more_data = create_data_columns(data, more_data)
@@ -1173,20 +1174,18 @@ function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, x
   local x_min,x_max = assert( minmax(x) )
   local y_min,y_max = assert( minmax(y) )
   local x_width,y_width,x_off,y_off
-  if xgrid == 1 then
+  if xgrid == 1 or x_max == x_min then
     x_width = math.max(1.0, x_max - x_min)
-    y_width = (y_max - y_min) / (ygrid-1)
     x_off = 0.0
-    y_off = y_width*0.5
-  elseif ygrid == 1 then
-    x_width = (x_max - x_min) / (xgrid-1)
-    y_width = math.max(1.0, y_max - y_min)
-    x_off = x_width*0.5
-    y_off = 0.0
   else
     x_width = (x_max - x_min) / (xgrid-1)
-    y_width = (y_max - y_min) / (ygrid-1)
     x_off = x_width*0.5
+  end
+  if ygrid == 1 or y_max == y_min then
+    y_width = math.max(1.0, y_max - y_min)
+    y_off = 0.0
+  else
+    y_width = (y_max - y_min) / (ygrid-1)
     y_off = y_width*0.5
   end
   local grid = {}
