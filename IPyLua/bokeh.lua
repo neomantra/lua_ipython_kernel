@@ -4,6 +4,8 @@ local html_template = require "IPyLua.html_template"
 local null = json.null
 local type = luatype or type
 
+local DEF_LEVEL = "__nil__"
+local DEF_BOX_WIDTH = 0.5
 local DEF_BREAKS = 20
 local DEF_XGRID = 100
 local DEF_YGRID = 100
@@ -713,7 +715,9 @@ local figure_methods = {
   -- layer functions
   
   boxes = function(self, params)
-
+    check_table(params, "min", "max", "q1", "q2", "q3", "x",
+                "outliers", "width", "alpha")
+    
     check_mandatories(params, "min", "max", "q1", "q2", "q3", "x")
 
     local x   = params.x
@@ -723,7 +727,8 @@ local figure_methods = {
     local q2  = params.q2
     local q3  = params.q3
     local outliers = params.outliers
-    local width = params.width
+    local width = params.width or DEF_BOX_WIDTH
+    local alpha = params.alpha or DEF_ALPHA
 
     local box_height = {}
     local box_mid = {}
@@ -739,47 +744,54 @@ local figure_methods = {
     end
 
     local color = params.color or next_color(self)
+
+    self:bars{ x = x,
+               y = line_mid,
+               height = line_height,
+               width = width * 0.005,
+               alpha = alpha,
+               color = color, }
     
     self:bars{ x = x,
                y = box_mid,
                height = box_height,
                width = width,
-               color = color, }
+               color = color,
+               alpha = alpha,
+               legend = params.legend, }
 
     self:bars{ x = x,
                y = q2,
-               height = 0.01 * max_height,
+               height = 0.005 * max_height,
                width = width,
+               alpha = alpha,
                color = color, }
 
     self:bars{ x = x,
                y = min,
-               height = 0.01 * max_height,
+               height = 0.005 * max_height,
                width = width * 0.3,
+               alpha = alpha,
                color = color, }
 
     self:bars{ x = x,
                y = max,
-               height = 0.01 * max_height,
+               height = 0.005 * max_height,
                width = width * 0.3,
+               alpha = alpha,
                color = color, }
 
-    self:bars{ x = x,
-               y = line_mid,
-               height = line_height,
-               width = width * 0.001,
-               color = color, }
-    
     -- FIXME: check sizes
     if outliers then
       for i=1,#x do
         if outliers[i] and #outliers[i] > 0 then
           local list = {}
           for j=1,#outliers[i] do list[j] = x[i] end
-          self:hist2d{ x = list,
+          self:points{ x = list,
                        y = outliers[i],
                        color = color,
-                       xgrid = 1, }
+                       alpha = alpha, }
+          --xgrid = 1, }
         end
       end
     end
@@ -801,7 +813,6 @@ local figure_methods = {
       q2       = {},
       q3       = {},
       outliers = {},
-      tag      = {},
       width    = {},
       x        = {},
     }
@@ -810,15 +821,21 @@ local figure_methods = {
     if type(x) == "table" or type(x) == "userdata" then
       levels = factors(x)
     else
-      levels = { x or "1" }
+      levels = { x or DEF_LEVEL }
+    end
+
+
+    local tbl = {}
+    for i,factor in ipairs(levels) do tbl[factor] = {} end
+    
+    for i=1,#y do
+      local key = x and x[i] and tostring(x[i]) or DEF_LEVEL
+      table.insert( tbl[key], y[i] )
     end
     
     for i,factor in ipairs(levels) do
       
-      local tbl = {}
-      for i=1,#y do
-        if not x or not x[i] or x[i] == factor then tbl[#tbl + 1] = y[i] end
-      end
+      local tbl = tbl[factor]
       table.sort(tbl)
       
       local q1 = quantile(tbl, 0.25)
@@ -843,7 +860,7 @@ local figure_methods = {
       boxes.q2[i]       = q2
       boxes.q3[i]       = q3
       boxes.outliers[i] = outliers
-      boxes.width       = params.width or 0.9
+      boxes.width       = params.width or DEF_BOX_WIDTH
       boxes.x[i]        = tostring( factor )
 
     end
@@ -928,28 +945,26 @@ local figure_methods = {
     return self
   end,
   
-  cors = function(self, params) -- data, alpha, legend, min, max
+  corplot = function(self, params) -- xy, names, alpha, legend, min, max
     params = params or {}
-    check_table(params, "xy", "xnames", "ynames", "alpha",
-                "legend", "min", "max")
+    check_table(params, "xy", "names", "alpha", "legend", "min", "max")
     check_mandatories(params, "xy")
     local alpha = params.alpha or DEF_ALPHA
     local hover = params.hover
 
-    local xnames = params.xnames or {}
-    local ynames = params.ynames or {}
+    local names = params.names or {}
     local xy = tomatrix( params.xy )
     local x = {}
     local y = {}
     local cor = {}
     
     local N = #xy
-    for i=1,N do
+    for i=N,1,-1 do
       local row = toseries( xy[i] )
       for j=1,#row do
         local c = row[j]
-        table.insert(x, xnames[j] or j)
-        table.insert(y, ynames[i] or i)
+        table.insert(x, names[j] or j)
+        table.insert(y, names[i] or i)
         table.insert(cor, c)
       end
     end
@@ -962,12 +977,15 @@ local figure_methods = {
       alpha=alpha,
       color=linear_color_transformer(cor, params.min or -1.0, params.max or 1.0),
       hover=cor,
+      legend=params.legend,
     }
 
     self:bars( data )
 
-    if xnames then self:x_axis{ type="CategoricalAxis", pos="below" } end
-    if ynames then self:y_axis{ type="CategoricalAxis", pos="left" } end
+    if names then
+      self:x_axis{ type="CategoricalAxis", pos="below" }
+      self:y_axis{ type="CategoricalAxis", pos="left" }
+    end
     
     return self
   end,
@@ -1272,7 +1290,7 @@ end
 function linear_size_transformer(x, smin, smax)
   local x = toseries(x)
   assert(type(x) == "table", "needs a series as 1st argument")
-  assert(smin and smax, "needs two numbers as 2nd and 3rd arguments")
+  local smin,smax = smin or DEF_SIZE*0.5, smax or DEF_SIZE*2.0
   local sdiff = smax - smin
   local min,max = minmax(x)
   local diff = max-min
