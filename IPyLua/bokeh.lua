@@ -4,6 +4,7 @@ local html_template = require "IPyLua.html_template"
 local null = json.null
 local type = luatype or type
 
+local DEF_BREAKS = 20
 local DEF_XGRID = 100
 local DEF_YGRID = 100
 local DEF_SIZE = 6
@@ -31,6 +32,31 @@ local hist2d_transformation
 local linear_color_transformer
 local linear_size_transformer
 ------------------------------
+
+local function quantile(tbl, q)
+  local N = #tbl
+  local pos = (N+1)*q
+  local pos_floor,pos_ceil,result = math.floor(pos),math.ceil(pos)
+  local result
+  if pos_floor == 0 then
+    return tbl[1]
+  elseif pos_floor >= N then
+    return tbl[N]
+  else
+    local dec = pos - pos_floor
+    local a,b = tbl[pos_floor],tbl[pos_ceil]
+    return a + dec * (b - a)
+  end
+end
+
+local function take_outliers(tbl, upper, lower)
+  local result = {}
+  for i=1,#tbl do
+    local x = tbl[i]
+    if x < lower or x > upper then result[#result+1] = x end
+  end
+  return result
+end
 
 local function round(val)
   if val > 0 then
@@ -281,7 +307,9 @@ local function check_axis_range(self)
     else
       local list,dict = {},{}
       for _,source in ipairs(self._sources) do
-        list,dict = factors(source.attributes.data.x, list, dict)
+        list,dict = factors(source.attributes.data.x or
+                              (glyphs[source.id].attributes.x or {}).value,
+                            list, dict)
       end
       self:x_range(list)
     end
@@ -304,7 +332,9 @@ local function check_axis_range(self)
     else
       local list,dict
       for _,source in ipairs(self._sources) do
-        list,dict = factors(source.attributes.data.y, list, dict)
+        list,dict = factors(source.attributes.data.y or
+                              (glyphs[source.id].attributes.y or {}).value,
+                            list, dict)
       end
       self:y_range(list)
     end
@@ -680,7 +710,147 @@ local figure_methods = {
   end,
   
   -- layer functions
+  
+  boxes = function(self, params)
 
+    check_mandatories(params, "min", "max", "q1", "q2", "q3", "x")
+
+    local x   = params.x
+    local min = params.min
+    local max = params.max
+    local q1  = params.q1
+    local q2  = params.q2
+    local q3  = params.q3
+    local outliers = params.outliers
+    local width = params.width
+
+    local box_height = {}
+    local box_mid = {}
+    local line_height = {}
+    local line_mid = {}
+    local max_height = 0
+    for i=1,#x do
+      box_mid[i]     = (q1[i] + q3[i])/2.0
+      box_height[i]  = q3[i] - q1[i]
+      line_mid[i]    = (max[i] + min[i])/2.0
+      line_height[i] = max[i] - min[i]
+      if box_height[i] > max_height then max_height = box_height[i] end
+    end
+
+    local color = params.color or next_color(self)
+    
+    self:bars{ x = x,
+               y = box_mid,
+               height = box_height,
+               width = width,
+               color = color, }
+
+    self:bars{ x = x,
+               y = q2,
+               height = 0.01 * max_height,
+               width = width,
+               color = color, }
+
+    self:bars{ x = x,
+               y = min,
+               height = 0.01 * max_height,
+               width = width * 0.3,
+               color = color, }
+
+    self:bars{ x = x,
+               y = max,
+               height = 0.01 * max_height,
+               width = width * 0.3,
+               color = color, }
+
+    self:bars{ x = x,
+               y = line_mid,
+               height = line_height,
+               width = width * 0.001,
+               color = color, }
+    
+    -- FIXME: check sizes
+    if outliers then
+      for i=1,#x do
+        if outliers[i] and #outliers[i] > 0 then
+          local list = {}
+          for j=1,#outliers[i] do list[j] = x[i] end
+          self:hist2d{ x = list,
+                       y = outliers[i],
+                       color = color,
+                       xgrid = 1, }
+        end
+      end
+    end
+
+    self:x_axis{ type="CategoricalAxis", pos="below" }
+    
+  end,
+  
+  boxplot = function(self, params)
+    local x = toseries( params.x )
+    local y = toseries( params.y )
+
+    assert(type(y) == "table" or type(y) == "userdata")
+
+    local boxes = {
+      min      = {},
+      max      = {},
+      q1       = {},
+      q2       = {},
+      q3       = {},
+      outliers = {},
+      tag      = {},
+      width    = {},
+      x        = {},
+    }
+    
+    local levels
+    if type(x) == "table" or type(x) == "userdata" then
+      levels = factors(x)
+    else
+      levels = { x or "1" }
+    end
+    
+    for i,factor in ipairs(levels) do
+      
+      local tbl = {}
+      for i=1,#y do
+        if not x or not x[i] or x[i] == factor then tbl[#tbl + 1] = y[i] end
+      end
+      table.sort(tbl)
+      
+      local q1 = quantile(tbl, 0.25)
+      local q2 = quantile(tbl, 0.50)
+      local q3 = quantile(tbl, 0.75)
+      local IQ = q3 - q1
+      
+      local min = params.min or quantile(tbl, 0.0)
+      local max = params.max or quantile(tbl, 1.0)
+      
+      local upper = math.min(q3 + 1.5 * IQ, max)
+      local lower = math.max(q1 - 1.5 * IQ, min)
+      
+      local outliers
+      if not params.ignore_outliers then
+        outliers = take_outliers(tbl, upper, lower)
+      end
+      
+      boxes.min[i]      = upper
+      boxes.max[i]      = lower
+      boxes.q1[i]       = q1
+      boxes.q2[i]       = q2
+      boxes.q3[i]       = q3
+      boxes.outliers[i] = outliers
+      boxes.width       = params.width or 0.9
+      boxes.x[i]        = tostring( factor )
+
+    end
+
+    self:boxes( boxes )
+    
+  end,
+  
   lines = function(self, params) -- x, y, color, alpha, width, legend, more_data
     params = params or {}
     check_table(params, "x", "y", "color", "alpha", "width", "legend", "more_data")
@@ -850,12 +1020,12 @@ local figure_methods = {
         minsize = params.minsize,
         maxsize = params.maxsize,
         xgrid = params.xgrid,
-        ygrid = params.ygrid
+        ygrid = params.ygrid,
       },
       {
-        glyph = params.glyph,
-        color = params.color,
-        alpha = params.alpha,
+        glyph  = params.glyph,
+        color  = params.color,
+        alpha  = params.alpha,
         legend = params.legend,
       }
     )
@@ -1000,10 +1170,25 @@ function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, x
   local ygrid = params.ygrid or DEF_YGRID
   assert(minsize <= maxsize, "failure of predicate minsize < maxsize")
   check_equal_sizes(x, y)
-  local x_min,x_max = minmax(x)
-  local y_min,y_max = minmax(y)
-  local x_width = (x_max - x_min) / (xgrid-1)
-  local y_width = (y_max - y_min) / (ygrid-1)
+  local x_min,x_max = assert( minmax(x) )
+  local y_min,y_max = assert( minmax(y) )
+  local x_width,y_width,x_off,y_off
+  if xgrid == 1 then
+    x_width = math.max(1.0, x_max - x_min)
+    y_width = (y_max - y_min) / (ygrid-1)
+    x_off = 0.0
+    y_off = y_width*0.5
+  elseif ygrid == 1 then
+    x_width = (x_max - x_min) / (xgrid-1)
+    y_width = math.max(1.0, y_max - y_min)
+    x_off = x_width*0.5
+    y_off = 0.0
+  else
+    x_width = (x_max - x_min) / (xgrid-1)
+    y_width = (y_max - y_min) / (ygrid-1)
+    x_off = x_width*0.5
+    y_off = y_width*0.5
+  end
   local grid = {}
   for i=1,xgrid*ygrid do grid[i] = 0 end
   local max_count = 0
@@ -1014,8 +1199,6 @@ function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, x
     grid[k] = grid[k] + 1
     if grid[k] > max_count then max_count= grid[k] end
   end
-  local x_off = x_width*0.5
-  local y_off = y_width*0.5
   local size_diff = maxsize - minsize
   local new_x,new_y,new_sizes,counts,ratios = {},{},{},{},{}
   local l=1
@@ -1043,7 +1226,7 @@ function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, x
       ratio = ratios,
     },
   }
-  for k,v in ipairs(more_params or {}) do
+  for k,v in pairs(more_params or {}) do
     assert(k ~= "more_data", "Unable to handle more_data argument")
     result[k]=v
   end
