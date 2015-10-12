@@ -349,16 +349,17 @@ do
   
   local function show_obj(obj, MAX)
     local data,metadata = lookup_function_for_object(obj, output_functions, MAX)
-    if data then return pcall_wrap(pyout,data,metadata) end
+    if data then pyout(data,metadata) return true end
     return false
   end
 
   local function help(obj, ...)
     local data,metadata = lookup_function_for_object(obj, help_functions, ...)
     if data then
-      if pcall_wrap(pyout,data,metadata) then return end
+      pyout(data,metadata)
+    else
+      pyout({ ["text/plain"] = "No documentation found" })
     end
-    pyout({ ["text/plain"] = "No documentation found" })
   end
   
   function new_environment()

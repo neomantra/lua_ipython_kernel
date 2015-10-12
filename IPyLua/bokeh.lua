@@ -26,7 +26,11 @@ local COLORS = {
 local figure = {}
 local figure_methods = {}
 
+-- forward declarations
 local hist2d_transformation
+local linear_color_transformer
+local linear_size_transformer
+------------------------------
 
 local function round(val)
   if val > 0 then
@@ -45,10 +49,12 @@ local function reduce(t, func)
   return out
 end
 
+local math_abs = math.abs
 local math_min = math.min
 local math_max = math.max
 
 local function min(t)
+  local t  = t or 0.0
   local tt = type(t)
   if tt == "table" or tt == "userdata" then
     return reduce(t, math_min)
@@ -58,6 +64,7 @@ local function min(t)
 end
 
 local function max(t)
+  local t  = t or 0.0
   local tt = type(t)
   if tt == "table" or tt == "userdata" then
     return reduce(t, math_max)
@@ -67,19 +74,21 @@ local function max(t)
 end
 
 local function minmax(t, size)
+  local t = t or 0.0
   local size = size or {}
   local tmin,tmax
   local tt = type(t)
   if tt == "table" or tt == "userdata" then
-    tmin = t[1] - (size[1] or 0)*0.5
-    tmax = t[1] + (size[1] or 0)*0.5
+    local s = (size[1] or 0)*0.5
+    tmin = t[1] - s
+    tmax = t[1] + s
     for i=2,#t do
       local s = (size[i] or 0)*0.5
-      tmin=math_min(tmin,t[i] - s)
-      tmax=math_max(tmax,t[i] + s)
+      tmin = math_min(tmin, t[i] - s)
+      tmax = math_max(tmax, t[i] + s)
     end
   else
-    local s = (max(size) or 0.0)*0.5
+    local s = max(size) * 0.5
     tmin = t - s
     tmax = t + s
   end
@@ -91,7 +100,7 @@ local function factors(t, out, dict)
   for i=1,#t do
     local s = tostring(t[i])
     if not dict[s] then
-      out[i],dict[s] = s,true
+      out[#out+1],dict[s] = s,true
     end
   end
   return out,dict
@@ -100,6 +109,16 @@ end
 local function apply_gap(p, a, b)
   local gap = p * (b-a)
   return a-gap, b+gap
+end
+
+local function tomatrix(m)
+  local tt = type(m)
+  if tt == "table" then return m end
+  if tt == "userdata" then
+    mt = getmetatable(m)
+    if mt.__index and mt.__len then return m end
+  end
+  error("Improper data type")
 end
 
 local function toseries(s)
@@ -124,6 +143,26 @@ local function invert(t)
   local r = {}
   for k,v in pairs(t) do r[v] = k end
   return r
+end
+
+local function compute_optim(x, DEF)
+  local optim
+  local x = toseries(x)
+  if type(x) == "number" then
+    optim = DEF
+  elseif type(x) == "string" then
+    optim = 1.0
+  else
+    if type(x[1]) == "string" then
+      optim = 1.0
+    else
+      optim = DEF
+      local t = {}
+      for i=1,#x do t[i] = x[i] end table.sort(t)
+      for i=2,#t do optim = math_min( optim, math_abs( t[i-1] - t[i] ) ) end
+    end
+  end
+  return optim
 end
 
 -- error checking
@@ -240,16 +279,16 @@ local function check_axis_range(self)
       end
       self:x_range( apply_gap(0.05, x_min, x_max) )
     else
-      local list,dict
+      local list,dict = {},{}
       for _,source in ipairs(self._sources) do
-        list,dict = factors(x, list, dict)
+        list,dict = factors(source.attributes.data.x, list, dict)
       end
       self:x_range(list)
     end
   end
 
   if not self._doc.attributes.y_range then
-    local axis = self._doc.attributes.below[1] or self._doc.attributes.above[1]
+    local axis = self._doc.attributes.left[1] or self._doc.attributes.right[1]
     if axis.type == "LinearAxis" then
       local y_min,y_max = math.huge,-math.huge
       for _,source in ipairs(self._sources) do
@@ -265,7 +304,7 @@ local function check_axis_range(self)
     else
       local list,dict
       for _,source in ipairs(self._sources) do
-        list,dict = factors(x, list, dict)
+        list,dict = factors(source.attributes.data.y, list, dict)
       end
       self:y_range(list)
     end
@@ -333,6 +372,7 @@ local function add_column_data_source(self, data, columns)
   local source_ref,source = add_simple_glyph(self, "ColumnDataSource",
                                              attributes)
   add_source(self, source)
+  
   return source_ref
 end
 
@@ -367,14 +407,25 @@ end
 
 local function add_axis(self, key, params)
   check_mandatories(params, "pos", "type")
+  
+  local formatter_type = "BasicTickFormatter"
+  local ticker_type = "BasicTicker"
+  
+  if params.type == "CategoricalAxis" then
+    formatter_type = "CategoricalTickFormatter"
+    ticker_type = "CategoricalTicker"
+  end
+  
   local doc_axis = self._doc.attributes[params.pos]
   if not doc_axis[1] then
-    local formatter_ref,formatter = add_simple_glyph(self, "BasicTickFormatter",
+    
+    local formatter_ref,formatter = add_simple_glyph(self, formatter_type,
                                                      { tags={}, doc=null })
     
     local ticker_ref,ticker =
-      add_simple_glyph(self, "BasicTicker",
-                       { tags={}, doc=null, mantissas={2, 5, 10} })
+      add_simple_glyph(self, ticker_type,
+                       { tags={}, doc=null, mantissas={2, 5, 10},
+                         num_minor_ticks=params.num_minor_ticks })
     
     local axis_ref,axis = add_simple_glyph(self, params.type,
                                            {
@@ -397,8 +448,18 @@ local function add_axis(self, key, params)
     doc_axis[1] = axis_ref
   else
     local axis = self._dict[ doc_axis[1].id ]
-    axis.attributes.axis_label = params.label
-    axis.type = params.type
+    if params.label then axis.attributes.axis_label = params.label end
+    if params.type then
+      axis.type = params.type
+      local formatter_id = axis.attributes.formatter.id
+      local ticker_id    = axis.attributes.ticker.id
+      local formatter    = self._dict[ formatter_id ]
+      local ticker       = self._dict[ ticker_id ]
+      formatter.type     = formatter_type
+      ticker.type        = ticker_type
+      update_references(self, formatter_id, formatter)
+      update_references(self, ticker_id, ticker)
+    end
     update_references(self, axis.id, axis)
   end
 end
@@ -659,11 +720,14 @@ local figure_methods = {
     check_mandatories(params, "x")
     local x = params.x or DEF_X
     local y = params.y or DEF_Y
-    local width = params.width or DEF_WIDTH
-    local height = params.height or DEF_HEIGTH
+    local width = params.width or "auto"
+    local height = params.height or "auto"
     local color = params.color or next_color(self)
     local alpha = params.alpha or DEF_ALPHA
     local hover = params.hover
+    
+    if width == "auto" then width = compute_optim(x, DEF_WIDTH) end
+    if height == "auto" then height = compute_optim(y, DEF_HEIGTH) end
     
     local data = {
       x=x,
@@ -689,6 +753,50 @@ local figure_methods = {
     local renderer_ref = append_source_renderer(self, source_ref, lines_ref)
 
     if params.legend then add_legend(self, params.legend, renderer_ref) end
+    
+    return self
+  end,
+  
+  cors = function(self, params) -- data, alpha, legend, min, max
+    params = params or {}
+    check_table(params, "xy", "xnames", "ynames", "alpha",
+                "legend", "min", "max")
+    check_mandatories(params, "xy")
+    local alpha = params.alpha or DEF_ALPHA
+    local hover = params.hover
+
+    local xnames = params.xnames or {}
+    local ynames = params.ynames or {}
+    local xy = tomatrix( params.xy )
+    local x = {}
+    local y = {}
+    local cor = {}
+    
+    local N = #xy
+    for i=1,N do
+      local row = toseries( xy[i] )
+      for j=1,#row do
+        local c = row[j]
+        table.insert(x, xnames[j] or j)
+        table.insert(y, ynames[i] or i)
+        table.insert(cor, c)
+      end
+    end
+    
+    local data = {
+      x=x,
+      y=y,
+      width=1.0,
+      height=1.0,
+      alpha=alpha,
+      color=linear_color_transformer(cor, params.min or -1.0, params.max or 1.0),
+      hover=cor,
+    }
+
+    self:bars( data )
+
+    if xnames then self:x_axis{ type="CategoricalAxis", pos="below" } end
+    if ynames then self:y_axis{ type="CategoricalAxis", pos="left" } end
     
     return self
   end,
@@ -946,10 +1054,13 @@ end
 -- color transformers
 
 -- http://www.andrewnoske.com/wiki/Code_-_heatmaps_and_color_gradients
-local function linear_color_transformer(x)
+function linear_color_transformer(x, xmin, xmax)
   local x = toseries(x)
   assert(type(x) == "table", "needs a series as input")
-  local min,max = minmax(x)
+  if not xmin and xmax then xmin = min(x) end
+  if not xmax and xmin then xmax = max(x) end
+  local min,max = xmin,xmax
+  if not min and not max then min,max = minmax(x) end
   local diff = max-min
   local color = {}
   -- 4 colors: blue, green, yellow, red
@@ -976,7 +1087,7 @@ local function linear_color_transformer(x)
   return color
 end
 
-local function linear_size_transformer(x, smin, smax)
+function linear_size_transformer(x, smin, smax)
   local x = toseries(x)
   assert(type(x) == "table", "needs a series as 1st argument")
   assert(smin and smax, "needs two numbers as 2nd and 3rd arguments")
