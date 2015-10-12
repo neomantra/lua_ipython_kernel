@@ -835,6 +835,7 @@ local figure_methods = {
     
     for i=1,#y do
       local key = x and x[i] and tostring(x[i]) or DEF_LEVEL
+      assert( plt[key], "found unknown factor level " .. key )
       table.insert( plt[key], y[i] )
     end
     
