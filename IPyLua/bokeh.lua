@@ -818,40 +818,45 @@ local figure_methods = {
     }
     
     local levels
-    if type(x) == "table" or type(x) == "userdata" then
-      levels = factors(x)
+    if not params.factors then
+      if type(x) == "table" or type(x) == "userdata" then
+        levels = factors(x)
+      else
+        levels = { x or DEF_LEVEL }
+      end
     else
-      levels = { x or DEF_LEVEL }
+      local aux = params.factors
+      levels = {}
+      for i=1,#aux do levels[i] = tostring(aux[i]) end
     end
-
-
-    local tbl = {}
-    for i,factor in ipairs(levels) do tbl[factor] = {} end
+    
+    local plt = {}
+    for i,factor in ipairs(levels) do plt[factor] = {} end
     
     for i=1,#y do
       local key = x and x[i] and tostring(x[i]) or DEF_LEVEL
-      table.insert( tbl[key], y[i] )
+      table.insert( plt[key], y[i] )
     end
     
     for i,factor in ipairs(levels) do
       
-      local tbl = tbl[factor]
-      table.sort(tbl)
+      local cur = plt[factor]
+      table.sort(cur)
       
-      local q1 = quantile(tbl, 0.25)
-      local q2 = quantile(tbl, 0.50)
-      local q3 = quantile(tbl, 0.75)
+      local q1 = quantile(cur, 0.25)
+      local q2 = quantile(cur, 0.50)
+      local q3 = quantile(cur, 0.75)
       local IQ = q3 - q1
       
-      local min = params.min or quantile(tbl, 0.0)
-      local max = params.max or quantile(tbl, 1.0)
+      local min = params.min or quantile(cur, 0.0)
+      local max = params.max or quantile(cur, 1.0)
       
       local upper = math.min(q3 + 1.5 * IQ, max)
       local lower = math.max(q1 - 1.5 * IQ, min)
       
       local outliers
       if not params.ignore_outliers then
-        outliers = take_outliers(tbl, upper, lower)
+        outliers = take_outliers(cur, upper, lower)
       end
       
       boxes.min[i]      = upper
