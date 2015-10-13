@@ -11,7 +11,7 @@ local DEF_HEIGTH = 6
 local DEF_LEVEL = "__nil__"
 local DEF_LINE_WIDTH = 2
 local DEF_SIZE = 6
-local DEF_VIOLIN_WIDTH=0.95
+local DEF_VIOLIN_WIDTH=0.90
 local DEF_WIDTH = 6
 local DEF_X = 0
 local DEF_XGRID = 100
@@ -874,7 +874,7 @@ local figure_methods = {
   bars = function(self, params) -- x, y, width, height, color, alpha, legend, hover, more_data
     params = params or {}
     check_table(params, "x", "height", "width", "y", "color", "alpha",
-                "legend", "hover", "more_data")
+                "legend", "hover", "more_data", "line_color")
     check_mandatories(params, "x")
     local x = params.x or DEF_X
     local y = params.y or DEF_Y
@@ -883,6 +883,7 @@ local figure_methods = {
     local color = params.color or next_color(self)
     local alpha = params.alpha or DEF_ALPHA
     local hover = params.hover
+    local line_color = params.line_color
     
     if width == "auto" then width = compute_optim(x, DEF_WIDTH) end
     if height == "auto" then height = compute_optim(y, DEF_HEIGTH) end
@@ -895,6 +896,7 @@ local figure_methods = {
       fill_alpha=alpha,
       color=color,
       hover=hover,
+      line_color=line_color,
     }
     local more_data = params.more_data or {}
     
@@ -1023,12 +1025,15 @@ local figure_methods = {
 
   vioplot = function(self, params) -- x, y, legend, alpha, color, factors, width
     
+    local color = params.color or next_color(self)
+    
     local violins =
       violin_transformation(params,
                             {
                               alpha = params.alpha,
                               legend = params.legend,
-                              color = params.color,
+                              color = color,
+                              line_color = color,
                             }
       )
     
@@ -1036,6 +1041,11 @@ local figure_methods = {
       self:bars(violins.bars[i])
     end
 
+    self:boxes(violins.boxes)
+    self:points{ x=violins.boxes.x,
+                 y=violins.boxes.q2,
+                 color="#ffffff", }
+    
     self:x_axis{ type="CategoricalAxis", pos="below" }
     
     return self
@@ -1172,7 +1182,9 @@ local function hist(x, breaks, output_type, scale)
   local inc    = diff / (breaks+1)
   local half   = inc * 0.5
   local bins   = {}
+  local width  = {}
   local y      = {}
+  local max    = 0.0
   for i=1,breaks do
     bins[i] = 0.0
     y[i] = (i - 1.0) * inc + half + min
@@ -1181,14 +1193,17 @@ local function hist(x, breaks, output_type, scale)
     local b = math_floor( (x[i] - min)/diff * breaks ) + 1.0
     b = math_max(0.0, math_min(breaks, b))
     bins[b] = bins[b] + 1.0
+    max = math_max(max, bins[b])
   end
+  local scale = scale or 1.0
+  for i=1,#bins do width[i] = (bins[i]/max)*scale end
   if output_type == "ratio" then
     local scale = scale or 1.0
-    local N = #x for i=1,#bins do bins[i] = (bins[i]/N)*scale end
+    local N = #x for i=1,#bins do bins[i] = (bins[i]/N) end
   elseif scale then
-    for i=1,#bins do bins[i] = bins[i] * scale end
+    for i=1,#bins do bins[i] = bins[i] end
   end
-  return { y=y, width=bins, height=inc }
+  return { y=y, width=width, height=inc, bins=bins, }
 end
 
 --
@@ -1352,13 +1367,24 @@ end
 
 function violin_transformation(params, more_params) -- x, y, factors, width, breaks
   local breaks = params.breaks or DEF_BREAKS
+  local width  = params.width or DEF_VIOLIN_WIDTH
   local x = toseries( params.x )
   local y = toseries( params.y )
 
   assert(type(y) == "table" or type(y) == "userdata")
 
   local violins = {
-    bars = {},
+    bars  = {},
+    boxes = {
+      min      = {},
+      max      = {},
+      q1       = {},
+      q2       = {},
+      q3       = {},
+      outliers = {},
+      width    = {},
+      x        = {},
+    },
   }
   
   local levels
@@ -1388,9 +1414,37 @@ function violin_transformation(params, more_params) -- x, y, factors, width, bre
     table.sort(cur)
     
     local bars = violins.bars
-    bars[i] = hist(cur, breaks, "ratio", width)
-    bars[i].x = tostring( factor )
-    bars[i].hover = bars[i].width
+    local h = hist(cur, breaks, "ratio", width)
+    
+    bars[i] = {
+      x      = tostring( factor ),
+      y      = h.y,
+      width  = h.width,
+      height = h.height,
+      hover  = h.bins,
+    }
+
+    local boxes = violins.boxes
+    local q1 = quantile(cur, 0.25)
+    local q2 = quantile(cur, 0.50)
+    local q3 = quantile(cur, 0.75)
+    local IQ = q3 - q1
+    
+    local min = quantile(cur, 0.0)
+    local max = quantile(cur, 1.0)
+    
+    local upper = math.min(q3 + 1.5 * IQ, max)
+    local lower = math.max(q1 - 1.5 * IQ, min)
+    
+    boxes.x[i]        = tostring( factor )
+    boxes.min[i]      = upper
+    boxes.max[i]      = lower
+    boxes.q1[i]       = q1
+    boxes.q2[i]       = q2
+    boxes.q3[i]       = q3
+    boxes.width       = width * 0.05
+    boxes.alpha       = 1.0
+    boxes.color       = "#000000"
     
     for k,v in pairs(more_params or {}) do
       assert(k ~= "more_data", "Unable to handle more_data argument")
