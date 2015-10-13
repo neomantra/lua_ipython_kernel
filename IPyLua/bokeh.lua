@@ -17,6 +17,7 @@ local DEF_X = 0
 local DEF_XGRID = 100
 local DEF_Y = 0
 local DEF_YGRID = 100
+local EPSILON = 1e-06
 
 local COLORS = {
   "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff", "#000000", 
@@ -29,6 +30,11 @@ local COLORS = {
   "#e00000", "#00e000", "#0000e0", "#e0e000", "#e000e0", "#00e0e0", "#e0e0e0", 
 }
 
+local math_abs = math.abs
+local math_floor = math.floor
+local math_min = math.min
+local math_max = math.max
+
 local figure = {}
 local figure_methods = {}
 
@@ -38,6 +44,15 @@ local hist2d_transformation
 local linear_color_transformer
 local linear_size_transformer
 ------------------------------
+
+local pi2 = math.pi/4.0
+local function cor2angle(c)
+  if c < 0 then return pi2 else return -pi2 end
+end
+
+local function cor2width(c)
+  return math_max(EPSILON, 1.0 - math.abs(c))
+end
 
 local function quantile(tbl, q)
   local N = #tbl
@@ -80,11 +95,6 @@ local function reduce(t, func)
   for i=2,#t do out = func(out, t[i]) end
   return out
 end
-
-local math_abs = math.abs
-local math_floor = math.floor
-local math_min = math.min
-local math_max = math.max
 
 local function min(t)
   local t  = t or 0.0
@@ -210,6 +220,7 @@ local function compute_optim(x, DEF)
     else
       local t = {}
       for i=1,#x do t[i] = x[i] end table.sort(t)
+      optim = math.huge
       for i=2,#t do optim = math_min( optim, math_abs( t[i-1] - t[i] ) ) end
     end
   end
@@ -916,43 +927,102 @@ local figure_methods = {
     return self
   end,
   
-  corplot = function(self, params) -- xy, names, alpha, legend, min, max
+  corplot = function(self, params) -- xy, names, alpha, legend
     params = params or {}
-    check_table(params, "xy", "names", "alpha", "legend", "min", "max")
+    check_table(params, "xy", "names", "alpha", "legend")
     check_mandatories(params, "xy")
     local alpha = params.alpha or DEF_ALPHA
     local hover = params.hover
 
     local names = params.names or {}
     local xy = tomatrix( params.xy )
-    local x = {}
-    local y = {}
-    local cor = {}
+
+    local bars_x = {}
+    local bars_y = {}
+    local bars_cor = {}
+
+    local ovals_x     = {}
+    local ovals_y     = {}
+    local ovals_w     = {}
+    local ovals_h     = {}
+    local ovals_cor   = {}
+    local ovals_angle = {}
+    local text = {}
+    local text_angle = {}
     
     local N = #xy
     for i=N,1,-1 do
       local row = toseries( xy[i] )
+      assert(#row == N, "Needs a squared matrix as input")
       for j=1,#row do
         local c = row[j]
-        table.insert(x, names[j] or j)
-        table.insert(y, names[i] or i)
-        table.insert(cor, c)
+        if j>i then
+          local a = cor2angle(c)
+          table.insert(ovals_x, names[j] or j)
+          table.insert(ovals_y, names[i] or i)
+          table.insert(ovals_angle, a)
+          table.insert(ovals_w, 0.9 * cor2width(c))
+          table.insert(ovals_cor, c)
+          table.insert(text, ("%.3f"):format(c))
+          table.insert(text_angle, -a)
+        else
+          table.insert(bars_x, names[j] or j)
+          table.insert(bars_y, names[i] or i)
+          table.insert(bars_cor, c)
+        end
       end
     end
     
-    local data = {
-      x=x,
-      y=y,
+    local bars_data = {
+      x=bars_x,
+      y=bars_y,
       width=1.0,
       height=1.0,
       alpha=alpha,
-      color=linear_color_transformer(cor, params.min or -1.0, params.max or 1.0),
-      hover=cor,
+      color=linear_color_transformer(bars_cor, -1.0, 1.0),
+      hover=bars_cor,
       legend=params.legend,
     }
+    bars_data.line_color = bars_data.color
 
-    self:bars( data )
+    self:bars( bars_data )
+    
+    local ovals_data = {
+      x=ovals_x,
+      y=ovals_y,
+      alpha=alpha,
+      color=linear_color_transformer(ovals_cor, -1.0, 1.0),
+      hover=ovals_cor,
+      legend=params.legend,
+      glyph="Oval",
+      more_data = {
+        angle=ovals_angle,
+        width=ovals_w,
+        height=0.9,
+      }
+    }
+    
+    self:points( ovals_data )
 
+    local text_data = {
+      x = ovals_x,
+      y = ovals_y,
+      color = "#000000",
+      glyph = "Text",
+      alpha = 1.0,
+      more_data = {
+        angle = text_angle,
+        text = text,
+        text_font_style="bold",
+        text_color = "#000000",
+        text_alpha = 1.0,
+        text_align = "center",
+        text_baseline = "middle",
+      }
+    }
+
+    self:points( text_data )
+    
     if names then
       self:x_axis{ type="CategoricalAxis", pos="below" }
       self:y_axis{ type="CategoricalAxis", pos="left" }
@@ -965,7 +1035,7 @@ local figure_methods = {
     params = params or {}
     check_table(params, "x", "y", "glyph", "color", "alpha", "size",
                 "legend", "hover", "more_data")
-    check_value(params, "glyph", "Circle", "Triangle")
+    check_value(params, "glyph", "Circle", "Triangle", "Oval", "Text")
     check_mandatories(params, "x", "y")
     local x = params.x
     local y = params.y
@@ -1175,7 +1245,7 @@ local function hist(x, breaks, output_type, scale)
   local max    = x[#x]
   local diff   = max - min
   assert(diff > 0, "Unable to compute histogram for given data")
-  local inc    = diff / (breaks+1)
+  local inc    = diff / breaks
   local half   = inc * 0.5
   local bins   = {}
   local width  = {}
