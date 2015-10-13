@@ -390,8 +390,10 @@ do
       end
       local args = table.pack(...)
       local html = { "<div>" }
-      for i=1,#args do
-        if args[i] == "\n" then
+      for i=1,args.n do
+        if args[i] == nil then
+          table.insert(html, '<pre>nil</pre>')
+        elseif args[i] == "\n" then
           table.insert(html, '<br style="clear: left;" />')
         else
           local component
@@ -419,16 +421,22 @@ do
     
     env_G.print = function(...)
       local args = table.pack(...)
-      for i=1,#args do args[i]=tostring(args[i]) end
+      for i=1,args.n do args[i]=tostring(args[i]) end
       local str = table.concat(args,"\t")
-      pyout({ ["text/plain"] = str.."\n" })
+      pyout({
+          ["text/plain"] = str.."\n",
+          ["text/html"]  = ("<pre>%s</pre>"):format(str),
+      })
     end
     
     env_G.io.write = function(...)
       local args = table.pack(...)
-      for i=1,#args do args[i]=tostring(args[i]) end
+      for i=1,args.n do args[i]=tostring(args[i]) end
       local str = table.concat(table.pack(...))
-      pyout({ ["text/plain"] = str.."\n" })
+      pyout({
+          ["text/plain"] = str.."\n",
+          ["text/html"]  = ("<pre>%s</pre>"):format(str),
+      })
     end
     
     env_G.vars = function()
@@ -570,7 +578,11 @@ local function send_pyerr_message(sock, parent, count, err)
                parent = parent,
                header = header,
                content = content,
-  }) 
+  })
+  -- env_G.pyout({
+  --     ["text/plain"] = err.."\n",
+  --     ["text/html"] = ("<pre>%s</pre>"):format(err),
+  -- })
 end
 
 -- implemented routes

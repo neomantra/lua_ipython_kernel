@@ -4,18 +4,20 @@ local html_template = require "IPyLua.html_template"
 local null = json.null
 local type = luatype or type
 
-local DEF_LEVEL = "__nil__"
+local DEF_ALPHA = 0.8
 local DEF_BOX_WIDTH = 0.5
 local DEF_BREAKS = 20
-local DEF_XGRID = 100
-local DEF_YGRID = 100
-local DEF_SIZE = 6
-local DEF_WIDTH = 6
-local DEF_LINE_WIDTH = 2
 local DEF_HEIGTH = 6
-local DEF_ALPHA = 0.8
+local DEF_LEVEL = "__nil__"
+local DEF_LINE_WIDTH = 2
+local DEF_SIZE = 6
+local DEF_VIOLIN_WIDTH=0.95
+local DEF_WIDTH = 6
 local DEF_X = 0
+local DEF_XGRID = 100
 local DEF_Y = 0
+local DEF_YGRID = 100
+
 local COLORS = {
   "#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff", "#000000", 
   "#800000", "#008000", "#000080", "#808000", "#800080", "#008080", "#808080", 
@@ -31,6 +33,7 @@ local figure = {}
 local figure_methods = {}
 
 -- forward declarations
+local box_transformation
 local hist2d_transformation
 local linear_color_transformer
 local linear_size_transformer
@@ -79,6 +82,7 @@ local function reduce(t, func)
 end
 
 local math_abs = math.abs
+local math_floor = math.floor
 local math_min = math.min
 local math_max = math.max
 
@@ -104,21 +108,33 @@ end
 
 local function minmax(t, size)
   local t = t or 0.0
-  local size = size or {}
+  local size = size or 0.0
   local tmin,tmax
   local tt = type(t)
   if tt == "table" or tt == "userdata" then
-    local s = (size[1] or 0)*0.5
-    tmin = t[1] - s
-    tmax = t[1] + s
-    for i=2,#t do
-      local s = (size[i] or 0)*0.5
-      tmin = math_min(tmin, t[i] - s)
-      tmax = math_max(tmax, t[i] + s)
+    if type(size) == "table" or type(size) == "userdata" then
+      local s = size[1] * 0.5
+      tmin = t[1] - s
+      tmax = t[1] + s
+      for i=2,#t do
+        local s = size[i] * 0.5
+        tmin = math_min(tmin, t[i] - s)
+        tmax = math_max(tmax, t[i] + s)
+      end
+    else
+      assert(type(size) == "number",
+             "Needs a series or number as second parameter")
+      local s = size * 0.5
+      tmin = t[1] - s
+      tmax = t[1] + s
+      for i=2,#t do
+        tmin = math_min(tmin, t[i] - s)
+        tmax = math_max(tmax, t[i] + s)
+      end
     end
   else
     local s = max(size) * 0.5
-    tmin = t - s
+    tmin = t - s 
     tmax = t + s
   end
   return tmin,tmax
@@ -126,8 +142,15 @@ end
 
 local function factors(t, out, dict)
   local out,dict = out or {},dict or {}
-  for i=1,#t do
-    local s = tostring(t[i])
+  if type(t) == "table" or type(t) == "userdata" then
+    for i=1,#t do
+      local s = tostring(t[i])
+      if not dict[s] then
+        out[#out+1],dict[s] = s,true
+      end
+    end
+  else
+    local s = tostring(t)
     if not dict[s] then
       out[#out+1],dict[s] = s,true
     end
@@ -300,11 +323,11 @@ local function check_axis_range(self)
       for _,source in ipairs(self._sources) do
         local s_min,s_max = minmax(source.attributes.data.x or
                                      (glyphs[source.id].attributes.x or {}).value,
-                                   source.attributes.data.width)
-        local offset = (glyphs[source.id].attributes.width or {}).value or 0.0
-
-        x_min = math.min(x_min,s_min) - offset*0.5
-        x_max = math.max(x_max,s_max) + offset*0.5
+                                   source.attributes.data.width or
+                                     (glyphs[source.id].attributes.width or {}).value)
+        
+        x_min = math.min(x_min,s_min)
+        x_max = math.max(x_max,s_max)
       end
       self:x_range( apply_gap(0.05, x_min, x_max) )
     else
@@ -325,11 +348,11 @@ local function check_axis_range(self)
       for _,source in ipairs(self._sources) do
         local s_min,s_max = minmax(source.attributes.data.y or
                                      (glyphs[source.id].attributes.y or {}).value,
-                                   source.attributes.data.height)    
-        local offset = (glyphs[source.id].attributes.height or {}).value or 0.0
+                                   source.attributes.data.height or
+                                     (glyphs[source.id].attributes.height or {}).value)
         
-        y_min = math.min(y_min, s_min) - offset*0.5
-        y_max = math.max(y_max, s_max) + offset*0.5
+        y_min = math.min(y_min, s_min)
+        y_max = math.max(y_max, s_max)
       end
       self:y_range( apply_gap(0.05, y_min, y_max) )
     else
@@ -714,9 +737,9 @@ local figure_methods = {
   
   -- layer functions
   
-  boxes = function(self, params)
+  boxes = function(self, params) -- min, max, q1, q2, q3, x, outliers, width, alpha, legend, color
     check_table(params, "min", "max", "q1", "q2", "q3", "x",
-                "outliers", "width", "alpha")
+                "outliers", "width", "alpha", "legend", "color")
     
     check_mandatories(params, "min", "max", "q1", "q2", "q3", "x")
 
@@ -798,80 +821,21 @@ local figure_methods = {
 
     self:x_axis{ type="CategoricalAxis", pos="below" }
     
+    return self
   end,
   
-  boxplot = function(self, params)
-    local x = toseries( params.x )
-    local y = toseries( params.y )
-
-    assert(type(y) == "table" or type(y) == "userdata")
-
-    local boxes = {
-      min      = {},
-      max      = {},
-      q1       = {},
-      q2       = {},
-      q3       = {},
-      outliers = {},
-      width    = {},
-      x        = {},
-    }
+  boxplot = function(self, params) -- x, y, legend, alpha, color, factors, width, ignore_outliers
     
-    local levels
-    if not params.factors then
-      if type(x) == "table" or type(x) == "userdata" then
-        levels = factors(x)
-      else
-        levels = { x or DEF_LEVEL }
-      end
-    else
-      local aux = params.factors
-      levels = {}
-      for i=1,#aux do levels[i] = tostring(aux[i]) end
-    end
-    
-    local plt = {}
-    for i,factor in ipairs(levels) do plt[factor] = {} end
-    
-    for i=1,#y do
-      local key = x and x[i] and tostring(x[i]) or DEF_LEVEL
-      assert( plt[key], "found unknown factor level " .. key )
-      table.insert( plt[key], y[i] )
-    end
-    
-    for i,factor in ipairs(levels) do
-      
-      local cur = plt[factor]
-      table.sort(cur)
-      
-      local q1 = quantile(cur, 0.25)
-      local q2 = quantile(cur, 0.50)
-      local q3 = quantile(cur, 0.75)
-      local IQ = q3 - q1
-      
-      local min = params.min or quantile(cur, 0.0)
-      local max = params.max or quantile(cur, 1.0)
-      
-      local upper = math.min(q3 + 1.5 * IQ, max)
-      local lower = math.max(q1 - 1.5 * IQ, min)
-      
-      local outliers
-      if not params.ignore_outliers then
-        outliers = take_outliers(cur, upper, lower)
-      end
-      
-      boxes.min[i]      = upper
-      boxes.max[i]      = lower
-      boxes.q1[i]       = q1
-      boxes.q2[i]       = q2
-      boxes.q3[i]       = q3
-      boxes.outliers[i] = outliers
-      boxes.width       = params.width or DEF_BOX_WIDTH
-      boxes.x[i]        = tostring( factor )
+    local boxes =
+      box_transformation( params,
+                          {
+                            legend=params.legend,
+                            alpha=params.alpha,
+                            color=params.color,
+                          }
+      )
 
-    end
-
-    self:boxes( boxes )
+    return self:boxes( boxes )
     
   end,
   
@@ -1056,6 +1020,26 @@ local figure_methods = {
     )
     return self:points( hist2d )
   end,
+
+  vioplot = function(self, params) -- x, y, legend, alpha, color, factors, width
+    
+    local violins =
+      violin_transformation(params,
+                            {
+                              alpha = params.alpha,
+                              legend = params.legend,
+                              color = params.color,
+                            }
+      )
+    
+    for i=1,#violins.bars do
+      self:bars(violins.bars[i])
+    end
+
+    self:x_axis{ type="CategoricalAxis", pos="below" }
+    
+    return self
+  end,
   
   -- conversion
 
@@ -1179,6 +1163,115 @@ setmetatable(
 
 -- data transformers
 
+local function hist(x, breaks, output_type, scale)
+  local result = {}
+  local min    = x[1]
+  local max    = x[#x]
+  local diff   = max - min
+  assert(diff > 0, "Unable to compute histogram for given data")
+  local inc    = diff / (breaks+1)
+  local half   = inc * 0.5
+  local bins   = {}
+  local y      = {}
+  for i=1,breaks do
+    bins[i] = 0.0
+    y[i] = (i - 1.0) * inc + half + min
+  end
+  for i=1,#x do
+    local b = math_floor( (x[i] - min)/diff * breaks ) + 1.0
+    b = math_max(0.0, math_min(breaks, b))
+    bins[b] = bins[b] + 1.0
+  end
+  if output_type == "ratio" then
+    local scale = scale or 1.0
+    local N = #x for i=1,#bins do bins[i] = (bins[i]/N)*scale end
+  elseif scale then
+    for i=1,#bins do bins[i] = bins[i] * scale end
+  end
+  return { y=y, width=bins, height=inc }
+end
+
+--
+function box_transformation(params, more_params) -- x, y, factors, width, ignore_outliers
+  local x = toseries( params.x )
+  local y = toseries( params.y )
+
+  assert(type(y) == "table" or type(y) == "userdata")
+
+  local boxes = {
+    min      = {},
+    max      = {},
+    q1       = {},
+    q2       = {},
+    q3       = {},
+    outliers = {},
+    width    = {},
+    x        = {},
+  }
+  
+  local levels
+  if not params.factors then
+    if type(x) == "table" or type(x) == "userdata" then
+      levels = factors(x)
+    else
+      levels = { x or DEF_LEVEL }
+    end
+  else
+    local aux = params.factors
+    levels = {}
+    for i=1,#aux do levels[i] = tostring(aux[i]) end
+  end
+  
+  local plt = {}
+  for i,factor in ipairs(levels) do plt[factor] = {} end
+  
+  for i=1,#y do
+    local key = x and x[i] and tostring(x[i]) or DEF_LEVEL
+    assert( plt[key], "found unknown factor level " .. key )
+    table.insert( plt[key], y[i] )
+  end
+  
+  for i,factor in ipairs(levels) do
+    
+    local cur = plt[factor]
+    table.sort(cur)
+    
+    local q1 = quantile(cur, 0.25)
+    local q2 = quantile(cur, 0.50)
+    local q3 = quantile(cur, 0.75)
+    local IQ = q3 - q1
+    
+    local min = params.min or quantile(cur, 0.0)
+    local max = params.max or quantile(cur, 1.0)
+    
+    local upper = math.min(q3 + 1.5 * IQ, max)
+    local lower = math.max(q1 - 1.5 * IQ, min)
+    
+    local outliers
+    if not params.ignore_outliers then
+      outliers = take_outliers(cur, upper, lower)
+    end
+    
+    boxes.min[i]      = upper
+    boxes.max[i]      = lower
+    boxes.q1[i]       = q1
+    boxes.q2[i]       = q2
+    boxes.q3[i]       = q3
+    boxes.outliers[i] = outliers
+    boxes.width       = params.width or DEF_BOX_WIDTH
+    boxes.x[i]        = tostring( factor )
+
+  end
+  
+  for k,v in pairs(more_params or {}) do
+    assert(k ~= "more_data", "Unable to handle more_data argument")
+    assert(not boxes[k], "Unable to redefine parameter " .. k)
+    boxes[k]=v
+  end
+  
+  return boxes
+end
+
 -- local hist2d_transformation is declared at the top of this file
 function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, xgrid, ygrid
   params = params or {}
@@ -1257,6 +1350,58 @@ function hist2d_transformation(params, more_params) -- x, y, minsize, maxsize, x
   return result
 end
 
+function violin_transformation(params, more_params) -- x, y, factors, width, breaks
+  local breaks = params.breaks or DEF_BREAKS
+  local x = toseries( params.x )
+  local y = toseries( params.y )
+
+  assert(type(y) == "table" or type(y) == "userdata")
+
+  local violins = {
+    bars = {},
+  }
+  
+  local levels
+  if not params.factors then
+    if type(x) == "table" or type(x) == "userdata" then
+      levels = factors(x)
+    else
+      levels = { x or DEF_LEVEL }
+    end
+  else
+    local aux = params.factors
+    levels = {}
+    for i=1,#aux do levels[i] = tostring(aux[i]) end
+  end
+  
+  local plt = {}
+  for i,factor in ipairs(levels) do plt[factor] = {} end
+  
+  for i=1,#y do
+    local key = x and x[i] and tostring(x[i]) or DEF_LEVEL
+    assert( plt[key], "found unknown factor level " .. key )
+    table.insert( plt[key], y[i] )
+  end
+  
+  for i,factor in ipairs(levels) do
+    local cur = plt[factor]
+    table.sort(cur)
+    
+    local bars = violins.bars
+    bars[i] = hist(cur, breaks, "ratio", width)
+    bars[i].x = tostring( factor )
+    bars[i].hover = bars[i].width
+    
+    for k,v in pairs(more_params or {}) do
+      assert(k ~= "more_data", "Unable to handle more_data argument")
+      assert(not bars[i][k], "Unable to redefine parameter " .. k)
+      bars[i][k]=v
+    end
+  end
+  
+  return violins
+end
+
 -- color transformers
 
 -- http://www.andrewnoske.com/wiki/Code_-_heatmaps_and_color_gradients
@@ -1317,6 +1462,7 @@ return {
     linear = linear_size_transformer,
   },
   transformations = {
+    box = box_transformation,
     hist2d = hist2d_transformation,
   },
 }
