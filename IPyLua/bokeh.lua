@@ -1364,6 +1364,7 @@ end
 function violin_transformation(params, more_params) -- x, y, factors, width, breaks
   local breaks = params.breaks or DEF_BREAKS
   local width  = params.width or DEF_VIOLIN_WIDTH
+  local more_params = more_params or {}
   local x = toseries( params.x )
   local y = toseries( params.y )
 
@@ -1439,15 +1440,13 @@ function violin_transformation(params, more_params) -- x, y, factors, width, bre
     boxes.q2[i]       = q2
     boxes.q3[i]       = q3
     boxes.width       = width * 0.05
+    boxes.alpha       = 1.0
+    boxes.color       = more_params.color
     
-    for k,v in pairs(more_params or {}) do
+    for k,v in pairs(more_params) do
       assert(k ~= "more_data", "Unable to handle more_data argument")
       assert(not bars[i][k], "Unable to redefine parameter " .. k)
       bars[i][k]=v
-      if k == "color" or k == "alpha" then
-        boxes[k]=boxes[k] or {}
-        boxes[k][i]=v
-      end
     end
   end
   
