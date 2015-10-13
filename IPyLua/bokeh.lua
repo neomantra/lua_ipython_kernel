@@ -1042,9 +1042,6 @@ local figure_methods = {
     end
 
     self:boxes(violins.boxes)
-    self:points{ x=violins.boxes.x,
-                 y=violins.boxes.q2,
-                 color="#ffffff", }
     
     self:x_axis{ type="CategoricalAxis", pos="below" }
     
@@ -1443,13 +1440,15 @@ function violin_transformation(params, more_params) -- x, y, factors, width, bre
     boxes.q2[i]       = q2
     boxes.q3[i]       = q3
     boxes.width       = width * 0.05
-    boxes.alpha       = 1.0
-    boxes.color       = "#000000"
     
     for k,v in pairs(more_params or {}) do
       assert(k ~= "more_data", "Unable to handle more_data argument")
       assert(not bars[i][k], "Unable to redefine parameter " .. k)
       bars[i][k]=v
+      if k == "color" or k == "alpha" then
+        boxes[k]=boxes[k] or {}
+        boxes[k][i]=v
+      end
     end
   end
   
