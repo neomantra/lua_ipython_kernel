@@ -208,7 +208,6 @@ local function compute_optim(x, DEF)
     if type(x[1]) == "string" then
       optim = 1.0
     else
-      optim = DEF
       local t = {}
       for i=1,#x do t[i] = x[i] end table.sort(t)
       for i=2,#t do optim = math_min( optim, math_abs( t[i-1] - t[i] ) ) end
@@ -788,7 +787,7 @@ local figure_methods = {
                height = 0.005 * max_height,
                width = width,
                alpha = alpha,
-               color = color, }
+               color = "#000000", }
 
     self:bars{ x = x,
                y = min,
