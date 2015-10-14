@@ -45,9 +45,9 @@ local linear_color_transformer
 local linear_size_transformer
 ------------------------------
 
-local pi2 = math.pi/4.0
+local pi4 = math.pi/4.0
 local function cor2angle(c)
-  if c < 0 then return pi2 else return -pi2 end
+  if c < 0 then return pi4 else return -pi4 end
 end
 
 local function cor2width(c)
@@ -992,7 +992,6 @@ local figure_methods = {
       y=ovals_y,
       alpha=alpha,
       color=linear_color_transformer(ovals_cor, -1.0, 1.0),
-      hover=ovals_cor,
       legend=params.legend,
       glyph="Oval",
       more_data = {
