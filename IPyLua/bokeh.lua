@@ -783,7 +783,8 @@ local figure_methods = {
                height = line_height,
                width = width * 0.005,
                alpha = alpha,
-               color = color, }
+               color = color,
+               line_color = "#000000", }
     
     self:bars{ x = x,
                y = box_mid,
@@ -791,7 +792,8 @@ local figure_methods = {
                width = width,
                color = color,
                alpha = alpha,
-               legend = params.legend, }
+               legend = params.legend,
+               line_color = "#000000", }
 
     self:bars{ x = x,
                y = q2,
@@ -805,14 +807,16 @@ local figure_methods = {
                height = 0.005 * max_height,
                width = width * 0.3,
                alpha = alpha,
-               color = color, }
+               color = color,
+               line_color = "#000000", }
 
     self:bars{ x = x,
                y = max,
                height = 0.005 * max_height,
                width = width * 0.3,
                alpha = alpha,
-               color = color, }
+               color = color,
+               line_color = "#000000", }
 
     -- FIXME: check sizes
     if outliers then
@@ -1108,7 +1112,7 @@ local figure_methods = {
     for i=1,#violins.bars do
       self:bars(violins.bars[i])
     end
-
+    
     self:boxes(violins.boxes)
     
     self:x_axis{ type="CategoricalAxis", pos="below" }
