@@ -1306,7 +1306,7 @@ function box_transformation(params, more_params) -- x, y, factors, width, ignore
   for i,factor in ipairs(levels) do plt[factor] = {} end
   
   for i=1,#y do
-    local key = x and x[i] and tostring(x[i]) or DEF_LEVEL
+    local key = x and x[i] and tostring(x[i]) or x or DEF_LEVEL
     assert( plt[key], "found unknown factor level " .. key )
     table.insert( plt[key], y[i] )
   end
@@ -1470,7 +1470,7 @@ function violin_transformation(params, more_params) -- x, y, factors, width, bre
   for i,factor in ipairs(levels) do plt[factor] = {} end
   
   for i=1,#y do
-    local key = x and x[i] and tostring(x[i]) or DEF_LEVEL
+    local key = x and x[i] and tostring(x[i]) or x or DEF_LEVEL
     assert( plt[key], "found unknown factor level " .. key )
     table.insert( plt[key], y[i] )
   end
