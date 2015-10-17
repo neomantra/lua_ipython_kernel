@@ -365,12 +365,13 @@ do
   function new_environment()
     local env_G,env = {},{}
     for k,v in pairs(_G) do env_G[k] = v end
+    
     env_G.args = nil
     env_G._G   = env_G
-    env_G._ENV = env
+    
     local env_G = setmetatable(env_G, { __index = _G })
-    local env = setmetatable(env, { __index = env_G })
-
+    local env   = setmetatable(env, { __index = env_G })
+    
     env_G.bokeh = bokeh
     
     env_G.pyout = function(data,metadata)
@@ -439,6 +440,11 @@ do
       })
     end
     
+    env_G.io.stdin  = nil -- forbidden
+    env_G.io.read   = nil -- forbidden
+    env_G.io.stdout = setmetatable({}, { __index={ write=env_G.print } })
+    env_G.io.stderr = setmetatable({}, { __index={ write=env_G.print } })
+    
     env_G.vars = function()
       show_obj(env, math.huge)
     end
@@ -467,6 +473,56 @@ do
       }
     end
     
+    local env_package = {}
+    for k,v in pairs(package) do
+      if type(v) == "table" then
+        env_package[k] = {}
+        for k2,v2 in pairs(v) do env_package[k][k2] = v2 end
+      else
+        env_package[k] = v
+      end
+    end
+    
+    local function lua_loader(name, modpath)
+      local fh = assert(io.open(modpath, 'rb'))
+      local source = fh:read'*a'
+      fh:close()
+      local ret = assert(load(source, modpath, 'bt', env_G))(name)
+      return ret
+    end
+    
+    --local function c_loader(name, modpath)
+    --local funcname = "luaopen_" .. name:gsub("^.*%-",""):gsub("%.","_")
+    --end
+    
+    env_package.searchers[2] = function(name)
+      local modpath, msg = env_package.searchpath(name, env_package.path)
+      if modpath then
+        return lua_loader, modpath
+      else
+        return nil, msg
+      end
+    end
+    
+    --env_package.searchers[3] = function(name)
+    --local modpath, msg = env_package.searchpath(name, env_package.cpath)
+    --if modpath then
+    --return c_loader, modpath
+    --else
+    --return nil, msg
+    --end
+    --end
+
+    env_G.package = env_package
+    
+    env_G.require = function(...)
+      local k,old = debug.getupvalue(require,1)
+      debug.setupvalue(require,1,env_package)
+      local result = require (...)
+      debug.setupvalue(require,1,old)
+      return result
+    end
+
     return env,env_G
   end
 end
