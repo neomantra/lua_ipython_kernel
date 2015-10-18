@@ -194,11 +194,54 @@ local env_session
 local env_parent
 local env_source
 do
+  local stdout_write = function(...)
+    local header = ipmsg_header( 'stream' )
+    local content = {
+      name = 'stdout',
+      data = table.concat(table.pack(...)),
+    }
+    ipmsg_send(kernel.iopub_sock, {
+                 session = env_session,
+                 parent = env_parent,
+                 header = header,
+                 content = content
+    })
+  end
+
+  local stderr_write = function(...)
+    local header = ipmsg_header( 'stream' )
+    local content = {
+      name = 'stderr',
+      data = table.concat(table.pack(...)),
+    }
+    ipmsg_send(kernel.iopub_sock, {
+                 session = env_session,
+                 parent = env_parent,
+                 header = header,
+                 content = content
+    })
+  end
+  
   local pyout = function(data, metadata)
     local header = ipmsg_header( 'pyout' )
     local content = {
       data = assert( data ),
       execution_count = current_execution_count(),
+      metadata = metadata or {},
+    }
+    ipmsg_send(kernel.iopub_sock, {
+                 session = env_session,
+                 parent = env_parent,
+                 header = header,
+                 content = content
+    })
+  end
+
+  local display_data = function(data, metadata)
+    local header = ipmsg_header( 'display_data' )
+    local content = {
+      data = assert( data ),
+      source = 'stdin',
       metadata = metadata or {},
     }
     ipmsg_send(kernel.iopub_sock, {
@@ -343,7 +386,7 @@ do
   
   local function pcall_wrap(func,...)
     local ok,msg = xpcall(func,debug.traceback,...)
-    if not ok then print(msg) return false end
+    if not ok then stderr_write(msg) return false end
     return true
   end
   
@@ -424,27 +467,19 @@ do
       local args = table.pack(...)
       for i=1,args.n do args[i]=tostring(args[i]) end
       local str = table.concat(args,"\t")
-      pyout({
-          ["text/plain"] = str.."\n",
-          ["text/html"]  = ("<pre>%s</pre>"):format(str),
-      })
+      stdout_write(str.."\n")
     end
+    
+    env_G.io.stdout = setmetatable({}, { __index={ write=function(_,...) return stdout_write(...) end } })
+    env_G.io.stderr = setmetatable({}, { __index={ write=function(_,...) return stderr_write(...) end } })
+    env_G.io.stdin  = nil -- forbidden
+    
+    env_G.io.read   = nil -- forbidden
     
     env_G.io.write = function(...)
-      local args = table.pack(...)
-      for i=1,args.n do args[i]=tostring(args[i]) end
-      local str = table.concat(table.pack(...))
-      pyout({
-          ["text/plain"] = str.."\n",
-          ["text/html"]  = ("<pre>%s</pre>"):format(str),
-      })
-    end
-    
-    env_G.io.stdin  = nil -- forbidden
-    env_G.io.read   = nil -- forbidden
-    env_G.io.stdout = setmetatable({}, { __index={ write=env_G.print } })
-    env_G.io.stderr = setmetatable({}, { __index={ write=env_G.print } })
-    
+      env_G.io.stdout:write(...)
+    end    
+
     env_G.vars = function()
       show_obj(env, math.huge)
     end
@@ -516,10 +551,14 @@ do
     env_G.package = env_package
     
     env_G.require = function(...)
+      local reg = debug.getregistry()
+      local reg_G = reg[2]
+      if rawequal(reg_G,_G) then reg[2] = env_G else reg_G = nil end
       local k,old = debug.getupvalue(require,1)
       debug.setupvalue(require,1,env_package)
       local result = require (...)
       debug.setupvalue(require,1,old)
+      if reg_G then reg[2] = reg_G end
       return result
     end
 
@@ -711,8 +750,7 @@ local shell_routes = {
                              parent.content.cursor_pos,
                              env_G, env, _ENV)
     if not ok then
-      print("Error at do_completion")
-      print(content)
+      stderr_write("Error at do_completion")
     else
       local session = parent.header.session
       local header = ipmsg_header( 'complete_reply' )
@@ -720,7 +758,7 @@ local shell_routes = {
                    session=session,
                    parent=parent,
                    header=header,
-                 content=content,
+                   content=content,
       })
     end
   end,
