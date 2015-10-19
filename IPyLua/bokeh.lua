@@ -41,6 +41,7 @@ local figure_methods = {}
 -- forward declarations
 local box_transformation
 local hist2d_transformation
+local violin_transformation
 local linear_color_transformer
 local linear_size_transformer
 ------------------------------

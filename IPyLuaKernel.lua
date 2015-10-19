@@ -550,7 +550,14 @@ do
 
     env_G.package = env_package
     
-    env_G.require = function(...)
+    setmetatable(package.loaded, {
+                   __index=env_package.loaded,
+                   __newindex=function(self,k,v) rawset(env_package.loaded,k,v) end,
+    })
+    
+    local function env_require(...)
+      local old_G = _G
+      local old_package_loaded = package.loaded
       local reg = debug.getregistry()
       local reg_G = reg[2]
       if rawequal(reg_G,_G) then reg[2] = env_G else reg_G = nil end
@@ -561,6 +568,8 @@ do
       if reg_G then reg[2] = reg_G end
       return result
     end
+    
+    env_G.require = env_require
 
     return env,env_G
   end
@@ -723,9 +732,16 @@ local shell_routes = {
   end,
 
   shutdown_request = function(sock, parent)
+    print("IPyLua: Received shutdown signal")
     parent.content = json.decode(parent.content)
     --
     send_busy_message(sock, parent)
+    -- free sandbox environment resources
+    setmetatable(package.loaded, {})
+    env   = nil
+    env_G = nil
+    collectgarbage("collect")
+    --
     local session = parent.header.session
     local header  = ipmsg_header( 'shutdown_reply' )
     local content = parent.content
@@ -739,7 +755,6 @@ local shell_routes = {
     for _, v in ipairs(kernel_sockets) do
       kernel[v.name]:close()
     end
-    os.exit()
   end,
 
   complete_request = function(sock, parent)
@@ -958,3 +973,4 @@ for _, v in ipairs(kernel_sockets) do
 end
 z_ctx:term()
 thread:join()
+print("IPyLua: Bye bye!")
