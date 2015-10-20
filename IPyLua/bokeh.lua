@@ -457,13 +457,19 @@ local function append_source_renderer(self, source_ref, glyph_ref)
 end
 
 local function add_legend(self, legend, renderer_ref)
-  local attributes = {
-    tags = {},
-    doc = null,
-    plot = self._docref,
-    legends = { { legend, { renderer_ref } } },
-  }
-  return append_renderer(self, add_simple_glyph(self, "Legend", attributes))
+  if not self._legend then
+    local attributes = {
+      tags = {},
+      doc = null,
+      plot = self._docref,
+      legends = { { legend, { renderer_ref } } },
+    }
+    local ref
+    ref,self._legend = add_simple_glyph(self, "Legend", attributes)
+    return append_renderer(self, ref)
+  else
+    table.insert(self._legend.attributes.legends, { legend, { renderer_ref } })
+  end
 end
 
 local function add_tool(self, name, attributes)
