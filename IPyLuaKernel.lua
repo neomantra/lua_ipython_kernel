@@ -281,7 +281,7 @@ do
           local max = false
           local keys = {}
           for k,v in pairs(obj) do
-            if type(k) ~= "number" then keys[#keys+1] = k end
+            if type(k) ~= "number" or k<1 or k>#obj then keys[#keys+1] = k end
           end
           table.sort(keys, function(a,b) return tostring(a) < tostring(b) end)
           for i,k in ipairs(keys) do
@@ -386,7 +386,7 @@ do
   
   local function pcall_wrap(func,...)
     local ok,msg = xpcall(func,debug.traceback,...)
-    if not ok then stderr_write(msg) return false end
+    if not ok then stderr_write(msg.."\n") return false end
     return true
   end
   
@@ -765,7 +765,7 @@ local shell_routes = {
                              parent.content.cursor_pos,
                              env_G, env, _ENV)
     if not ok then
-      stderr_write("Error at do_completion")
+      env_G.io.stderr:write("Error at do_completion\n")
     else
       local session = parent.header.session
       local header = ipmsg_header( 'complete_reply' )
