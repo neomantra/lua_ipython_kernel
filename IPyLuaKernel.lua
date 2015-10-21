@@ -556,16 +556,11 @@ do
     })
     
     local function env_require(...)
-      local old_G = _G
       local old_package_loaded = package.loaded
-      local reg = debug.getregistry()
-      local reg_G = reg[2]
-      if rawequal(reg_G,_G) then reg[2] = env_G else reg_G = nil end
       local k,old = debug.getupvalue(require,1)
       debug.setupvalue(require,1,env_package)
       local result = require (...)
       debug.setupvalue(require,1,old)
-      if reg_G then reg[2] = reg_G end
       return result
     end
     
@@ -576,6 +571,9 @@ do
 end
 local env,env_G = new_environment()
 
+local reg = debug.getregistry()
+local reg_G = reg[2]
+if rawequal(reg_G,_G) then reg[2] = env_G else reg_G = nil end
 -------------------------------------------------------------------------------
 
 local function send_execute_reply(sock, parent, count, status, err)
@@ -755,6 +753,7 @@ local shell_routes = {
     for _, v in ipairs(kernel_sockets) do
       kernel[v.name]:close()
     end
+    if reg_G then reg[2] = reg_G end
   end,
 
   complete_request = function(sock, parent)
