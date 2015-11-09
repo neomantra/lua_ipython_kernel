@@ -18,7 +18,7 @@ local element_mt = {
       elseif data["text/html"] then
         tbl[#tbl+1] = data["text/html"]
       else
-        tbl[#tbl+1] = ("<pre>%s</pre>"):format(assert( data["text/plain"] ))
+        tbl[#tbl+1] = assert( data["text/plain"] )
       end
     end
     tbl[#tbl+1] = "</"
