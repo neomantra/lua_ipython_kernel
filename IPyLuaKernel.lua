@@ -416,6 +416,7 @@ do
     local env   = setmetatable(env, { __index = env_G })
     
     env_G.bokeh = bokeh
+    env_G.dom_builder = dom_builder
     
     env_G.pyout = function(data,metadata)
       metadata = metadata or {}
@@ -570,6 +571,8 @@ do
   end
 end
 local env,env_G = new_environment()
+_G.pyget = env_G.pyget
+env_G.dom_builder = require "IPyLua.dom_builder"
 
 local reg = debug.getregistry()
 local reg_G = reg[2]
