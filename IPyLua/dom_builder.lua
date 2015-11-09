@@ -12,7 +12,13 @@ local element_mt = {
     end
     tbl[#tbl+1] = ">"
     for i=1,#self do
-      local data = pyget(self[i])
+      local data
+      local tt = type(self[i])
+      if tt == "string" or tt == "number" then
+        data = { ["text/html"] = self[i] }
+      else
+        data = pyget(self[i])
+      end
       if data["image/png"] then
         tbl[#tbl+1] = ('<img src="data:image/png;base64,%s">'):format(data["image/png"])
       elseif data["text/html"] then
