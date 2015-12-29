@@ -1251,10 +1251,13 @@ setmetatable(
 -- data transformers
 
 local function hist(x, breaks, output_type, scale)
-  local result = {}
+  local scale = scale or 1.0
   local min    = x[1]
   local max    = x[#x]
   local diff   = max - min
+  if min == max then
+    return { y={min}, bins={#x}, width={#x*scale}, height={1.0} }
+  end
   assert(diff > 0, "Unable to compute histogram for given data")
   local inc    = diff / breaks
   local half   = inc * 0.5
@@ -1272,7 +1275,6 @@ local function hist(x, breaks, output_type, scale)
     bins[b] = bins[b] + 1.0
     max = math_max(max, bins[b])
   end
-  local scale = scale or 1.0
   for i=1,#bins do width[i] = (bins[i]/max)*scale end
   if output_type == "ratio" then
     local scale = scale or 1.0
