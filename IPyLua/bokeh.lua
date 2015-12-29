@@ -1256,7 +1256,7 @@ local function hist(x, breaks, output_type, scale)
   local max    = x[#x]
   local diff   = max - min
   if min == max then
-    return { y={min}, bins={#x}, width={#x*scale}, height={1.0} }
+    return { y={min}, bins={#x}, width={scale}, height={scale} }
   end
   assert(diff > 0, "Unable to compute histogram for given data")
   local inc    = diff / breaks
